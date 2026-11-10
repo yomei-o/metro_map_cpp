@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>東京の地下鉄 列車マップ</title>
+<style>
+:root { --bg: #070a12; --panel: rgba(14, 19, 30, 0.78); --fg: #e6ebf2; --muted: #8d99ab; --line: rgba(255, 255, 255, 0.10); --accent: #5ab0ff; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 14px/1.5 system-ui, "Hiragino Sans", "Yu Gothic UI", sans-serif; overflow: hidden; }
+#wrap { position: fixed; inset: 0; overflow: hidden; touch-action: none; cursor: grab; }
+#wrap.drag { cursor: grabbing; }
+canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; transform-origin: 0 0; }
+.panel { position: fixed; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+#top { left: 16px; top: 16px; padding: 12px 14px; max-width: calc(100vw - 32px); }
+h1 { font-size: 1.05rem; margin: 0 0 2px; letter-spacing: 0.04em; }
+.sub { color: var(--muted); font-size: 0.8rem; }
+.row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 10px; }
+button, select { background: rgba(255, 255, 255, 0.06); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 5px 11px; font: inherit; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button.on { background: var(--accent); color: #04121f; border-color: var(--accent); font-weight: 600; }
+#legend { right: 16px; top: 16px; padding: 10px 12px; max-height: calc(100vh - 32px); overflow: auto; }
+#legend div { display: flex; align-items: center; gap: 8px; padding: 2px 0; white-space: nowrap; font-size: 0.85rem; }
+.pill { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; font-weight: 700; font-size: 0.75rem; color: #fff; text-shadow: 0 0 2px rgba(0,0,0,.6); }
+#tip { position: fixed; pointer-events: none; padding: 6px 10px; display: none; font-size: 0.9rem; }
+#note { left: 16px; bottom: 16px; padding: 8px 12px; color: var(--muted); font-size: 0.78rem; max-width: calc(100vw - 32px); }
+@media (max-width: 700px) { #legend { display: none; } }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="cv"></canvas></div>
+
+<div class="panel" id="top">
+  <h1>東京の地下鉄 列車マップ</h1>
+  <div class="sub" id="status">読み込み中…</div>
+  <div class="row">
+    <button id="mGeo" class="on">実際の地図</button>
+    <button id="mSch">路線図</button>
+    <button id="fit">全体を表示</button>
+    <select id="speed" title="仮の列車の速さ">
+      <option value="1">等速</option>
+      <option value="8" selected>8 倍速</option>
+      <option value="30">30 倍速</option>
+    </select>
+  </div>
+</div>
+<div class="panel" id="legend"></div>
+<div class="panel" id="tip"></div>
+<div class="panel" id="note">いまの列車は仮のもの（ODPT の承認待ち）。光る頭と尾が列車で、尾の反対側へ進んでいます。ドラッグで移動、ホイールで拡大縮小。<br>
+線路と駅：「国土数値情報（鉄道データ）」（国土交通省）を加工して作成（CC BY 4.0）／ 文字：Noto Sans JP（SIL OFL 1.1）</div>
+
+<script src="mm.js"></script>
+<script>
+const wrap = document.getElementById('wrap'), cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+const statusEl = document.getElementById('status'), tip = document.getElementById('tip');
+let M = null, W = 0, H = 0, img = null, dpr = 1, lineInfo = {};
+// 操作中は描き直さず、最後の絵を CSS で動かす（手を止めたら描き直す）
+let drag = null, cssX = 0, cssY = 0, cssS = 1, pendingPan = [0, 0], pendingZoom = null, settleTimer = 0;
+
+function size() {
+  dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+  const w = Math.max(320, Math.round(innerWidth * dpr)), h = Math.max(240, Math.round(innerHeight * dpr));
+  // 描画は CPU なので、大きすぎる画面は縮める
+  const k = Math.min(1, Math.sqrt(1920 * 1100 / (w * h)));
+  W = Math.round(w * k); H = Math.round(h * k);
+  cv.width = W; cv.height = H;
+  img = ctx.createImageData(W, H);
+  M._mm_resize(W, H);
+}
+const pxScale = () => W / innerWidth;   // CSS px → 描画 px
+
+function settle() {
+  if (pendingPan[0] || pendingPan[1]) { M._mm_pan(pendingPan[0], pendingPan[1]); pendingPan = [0, 0]; }
+  if (pendingZoom) { M._mm_zoom(pendingZoom.f, pendingZoom.x, pendingZoom.y); pendingZoom = null; }
+  cssX = cssY = 0; cssS = 1; cv.style.transform = '';
+}
+
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  if (!drag && !settleTimer) {
+    M._mm_tick(dt);
+    const p = M._mm_render();
+    img.data.set(M.HEAPU8.subarray(p, p + W * H * 4));
+    ctx.putImageData(img, 0, 0);
+  }
+  requestAnimationFrame(frame);
+}
+
+// ---- 操作 ----
+wrap.addEventListener('pointerdown', (e) => { drag = { x: e.clientX, y: e.clientY }; wrap.classList.add('drag'); wrap.setPointerCapture(e.pointerId); tip.style.display = 'none'; });
+wrap.addEventListener('pointermove', (e) => {
+  if (drag) {
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag.x = e.clientX; drag.y = e.clientY;
+    cssX += dx; cssY += dy; pendingPan[0] += dx * pxScale(); pendingPan[1] += dy * pxScale();
+    cv.style.transform = `translate(${cssX}px, ${cssY}px) scale(${cssS})`;
+    return;
+  }
+  if (!M) return;
+  const s = pxScale();
+  const j = JSON.parse(M.UTF8ToString(M._mm_pick(e.clientX * s, e.clientY * s)));
+  if (j.name) {
+    tip.innerHTML = `<b>${j.name}</b><br>` + j.lines.map(c => `<span class="pill" style="background:#${lineInfo[c].color}">${c}</span> ${lineInfo[c].name}`).join('<br>');
+    tip.style.left = (e.clientX + 14) + 'px'; tip.style.top = (e.clientY + 14) + 'px'; tip.style.display = 'block';
+  } else tip.style.display = 'none';
+});
+const endDrag = () => { if (!drag) return; drag = null; wrap.classList.remove('drag'); settle(); };
+wrap.addEventListener('pointerup', endDrag);
+wrap.addEventListener('pointercancel', endDrag);
+wrap.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const f = Math.exp(-e.deltaY * 0.0015);
+  const s = pxScale();
+  // 先に溜まっている移動を反映してから、拡大の中心を決める
+  if (pendingZoom) { pendingZoom.f *= f; } else pendingZoom = { f, x: e.clientX * s, y: e.clientY * s };
+  // CSS では、カーソル位置を中心に拡大して見せる
+  cssX = e.clientX - (e.clientX - cssX) * f; cssY = e.clientY - (e.clientY - cssY) * f; cssS *= f;
+  cv.style.transform = `translate(${cssX}px, ${cssY}px) scale(${cssS})`;
+  clearTimeout(settleTimer);
+  settleTimer = setTimeout(() => { settleTimer = 0; settle(); }, 160);
+}, { passive: false });
+
+const mGeo = document.getElementById('mGeo'), mSch = document.getElementById('mSch');
+mGeo.onclick = () => { M._mm_mode(0); mGeo.classList.add('on'); mSch.classList.remove('on'); };
+mSch.onclick = () => { M._mm_mode(1); mSch.classList.add('on'); mGeo.classList.remove('on'); };
+document.getElementById('fit').onclick = () => M._mm_fit();
+document.getElementById('speed').onchange = (e) => M._mm_speed(+e.target.value);
+addEventListener('resize', () => { if (M) { size(); M._mm_fit(); } });
+
+(async () => {
+  const [net, font, mod] = await Promise.all([
+    fetch('network.txt').then(r => r.text()), fetch('font.ttf').then(r => r.arrayBuffer()), createMM()]);
+  M = mod;
+  const n = M.lengthBytesUTF8(net) + 1, tp = M._malloc(n); M.stringToUTF8(net, tp, n);
+  const fb = new Uint8Array(font), fp = M._malloc(fb.length); M.HEAPU8.set(fb, fp);
+  const stations = M._mm_init(tp, fp, fb.length);
+  M._free(tp);   // フォントは C++ 側がコピーして持つ
+  M._free(fp);
+  const lines = JSON.parse(M.UTF8ToString(M._mm_lines()));
+  lines.forEach(l => lineInfo[l.code] = l);
+  document.getElementById('legend').innerHTML = lines.map(l => `<div><span class="pill" style="background:#${l.color}">${l.code}</span>${l.name}</div>`).join('');
+  statusEl.textContent = `${lines.length} 路線・${stations} 駅（乗換駅は 1 つにまとめて数える）`;
+  size(); M._mm_fit();
+  requestAnimationFrame(frame);
+})().catch(err => statusEl.textContent = '読み込みに失敗: ' + err);
+</script>
+</body>
+</html>
