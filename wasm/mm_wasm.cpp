@@ -19,6 +19,7 @@ EMSCRIPTEN_KEEPALIVE void mm_fit() { g.fit(); }
 EMSCRIPTEN_KEEPALIVE void mm_pan(double dx, double dy) { g.pan(dx, dy); }
 EMSCRIPTEN_KEEPALIVE void mm_zoom(double f, double x, double y) { g.zoom(f, x, y); }
 EMSCRIPTEN_KEEPALIVE void mm_mode(int m) { g.set_mode(m); }
+EMSCRIPTEN_KEEPALIVE void mm_ui(double u) { g.ui = u; g.dirty = true; }
 EMSCRIPTEN_KEEPALIVE void mm_speed(double s) { g.sim_speed = s; }
 EMSCRIPTEN_KEEPALIVE void mm_tick(double dt) { g.tick(dt); }
 EMSCRIPTEN_KEEPALIVE const uint8_t* mm_render() { return g.render(); }

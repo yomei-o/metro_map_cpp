@@ -7,5 +7,5 @@ if(MSVC)
   add_compile_options(/utf-8 /O2 /wd4244 /wd4267 /wd4996)
 endif()
 add_executable(metro_map main.cpp)
-target_include_directories(metro_map PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} third_party)
+target_include_directories(metro_map PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} third_party third_party/nlohmann)
 

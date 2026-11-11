@@ -38,6 +38,7 @@ struct Map {
     double mode = 0, target = 0;          // 0 = 実際の地図風、1 = 路線図風
     P2 center{0, 0};                      // 画面の中心（世界座標＝km）
     double scale = 1;                     // 1 km あたりの px
+    double ui = 1;                        // 描画 px と画面の px の比（スマホは 1.5 など）。文字と線の最小の太さに掛ける
     std::vector<Train> trains;
     double sim_speed = 8;                 // 仮の列車の早送り倍率
     double clock = 0;
@@ -156,7 +157,7 @@ struct Map {
         return out;
     }
 
-    float line_width() const { return (float)std::clamp(scale * 0.11, 2.0, 9.0); }
+    float line_width() const { return (float)std::clamp(scale * 0.11, 2.0 * ui, 9.0 * ui); }
 
     // ---- 地図（線・駅・駅名）を base に描く ----
     void draw_base() {
@@ -201,8 +202,8 @@ struct Map {
     // 駅名：乗換駅を先に、重ならない場所（右・左・上・下）に置く。小さく表示しているときは乗換駅だけ
     void draw_labels(float r) {
         if (!font.ok) return;
-        const int px = (int)std::clamp(scale * 0.32, 10.0, 16.0);
-        const bool all = scale > 60;
+        const int px = (int)std::clamp(scale * 0.32, 10.0 * ui, 16.0 * ui);
+        const bool all = scale > 60 * ui;
         struct Box { float x0, y0, x1, y1; };
         std::vector<Box> used;
         for (size_t n = 0; n < net.nodes.size(); ++n) { V2 p = to_screen(node_pos((int)n)); used.push_back({p.x - r, p.y - r, p.x + r, p.y + r}); }

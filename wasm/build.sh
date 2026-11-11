@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.."
 EMSDK="${EMSDK:-/c/prog/emsdk/emsdk}"
 EMCC="$EMSDK/upstream/emscripten/emcc.exe"
 [ -x "$EMCC" ] || EMCC="$EMSDK/upstream/emscripten/emcc"
-"$EMCC" -std=c++17 -O3 -msimd128 -DNDEBUG -I. -Ithird_party \
+"$EMCC" -std=c++17 -O3 -msimd128 -DNDEBUG -I. -Ithird_party -Ithird_party/nlohmann \
   -s MODULARIZE=1 -s EXPORT_NAME=createMM -s ALLOW_MEMORY_GROWTH=1 -s STACK_SIZE=4194304 \
   -s EXPORTED_RUNTIME_METHODS='["HEAPU8","UTF8ToString","stringToUTF8","lengthBytesUTF8"]' -s EXPORTED_FUNCTIONS='["_malloc","_free"]' \
   wasm/mm_wasm.cpp -o docs/mm.js

@@ -46,7 +46,7 @@ button.on { background: var(--accent); color: #04121f; border-color: var(--accen
 </div>
 <div class="panel" id="legend"></div>
 <div class="panel" id="tip"></div>
-<div class="panel" id="note">いまの列車は仮のもの（ODPT の承認待ち）。光る頭と尾が列車で、尾の反対側へ進んでいます。ドラッグで移動、ホイールで拡大縮小。<br>
+<div class="panel" id="note">いまの列車は仮のもの（ODPT の承認待ち）。光る頭と尾が列車で、尾の反対側へ進んでいます。ドラッグで移動、ホイール・2 本指で拡大縮小、駅をタップで名前。<br>
 線路と駅：「国土数値情報（鉄道データ）」（国土交通省）を加工して作成（CC BY 4.0）／ 文字：Noto Sans JP（SIL OFL 1.1）</div>
 
 <script src="mm.js"></script>
@@ -55,7 +55,10 @@ const wrap = document.getElementById('wrap'), cv = document.getElementById('cv')
 const statusEl = document.getElementById('status'), tip = document.getElementById('tip');
 let M = null, W = 0, H = 0, img = null, dpr = 1, lineInfo = {};
 // 操作中は描き直さず、最後の絵を CSS で動かす（手を止めたら描き直す）
-let drag = null, cssX = 0, cssY = 0, cssS = 1, pendingPan = [0, 0], pendingZoom = null, settleTimer = 0;
+// 見た目は「描画した絵を cssX, cssY だけ動かして cssS 倍」。手を止めたら、それを C++ に渡して描き直す
+let cssX = 0, cssY = 0, cssS = 1, settleTimer = 0;
+const pts = new Map();   // 画面に触れている指（マウス）: pointerId -> {x, y}
+let drag = null, pinch = null, tap = null;
 
 function size() {
   dpr = Math.min(window.devicePixelRatio || 1, 1.5);
@@ -66,19 +69,25 @@ function size() {
   cv.width = W; cv.height = H;
   img = ctx.createImageData(W, H);
   M._mm_resize(W, H);
+  M._mm_ui(W / innerWidth);   // 文字と線を、画面の上で同じくらいの大きさにする
 }
 const pxScale = () => W / innerWidth;   // CSS px → 描画 px
 
+function applyCss() { cv.style.transform = `translate(${cssX}px, ${cssY}px) scale(${cssS})`; }
+// 画面の点 = (cssX, cssY) + cssS × 絵の点。これは「cssX/cssS だけ動かしてから、左上を中心に cssS 倍」と同じ
 function settle() {
-  if (pendingPan[0] || pendingPan[1]) { M._mm_pan(pendingPan[0], pendingPan[1]); pendingPan = [0, 0]; }
-  if (pendingZoom) { M._mm_zoom(pendingZoom.f, pendingZoom.x, pendingZoom.y); pendingZoom = null; }
+  if (M && (cssX || cssY || cssS !== 1)) {
+    const s = pxScale();
+    M._mm_pan(cssX * s / cssS, cssY * s / cssS);
+    M._mm_zoom(cssS, 0, 0);
+  }
   cssX = cssY = 0; cssS = 1; cv.style.transform = '';
 }
 
 let last = performance.now();
 function frame(now) {
   const dt = Math.min(0.1, (now - last) / 1000); last = now;
-  if (!drag && !settleTimer) {
+  if (!pts.size && !settleTimer) {
     M._mm_tick(dt);
     const p = M._mm_render();
     img.data.set(M.HEAPU8.subarray(p, p + W * H * 4));
@@ -88,34 +97,62 @@ function frame(now) {
 }
 
 // ---- 操作 ----
-wrap.addEventListener('pointerdown', (e) => { drag = { x: e.clientX, y: e.clientY }; wrap.classList.add('drag'); wrap.setPointerCapture(e.pointerId); tip.style.display = 'none'; });
-wrap.addEventListener('pointermove', (e) => {
-  if (drag) {
-    const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag.x = e.clientX; drag.y = e.clientY;
-    cssX += dx; cssY += dy; pendingPan[0] += dx * pxScale(); pendingPan[1] += dy * pxScale();
-    cv.style.transform = `translate(${cssX}px, ${cssY}px) scale(${cssS})`;
-    return;
-  }
+// 1 本指（マウス）でドラッグ、2 本指でピンチ（拡大縮小と移動）、ホイールで拡大縮小。動かさずに離すと駅の名前
+function showTip(x, y) {
   if (!M) return;
   const s = pxScale();
-  const j = JSON.parse(M.UTF8ToString(M._mm_pick(e.clientX * s, e.clientY * s)));
+  const j = JSON.parse(M.UTF8ToString(M._mm_pick(x * s, y * s)));
   if (j.name) {
     tip.innerHTML = `<b>${j.name}</b><br>` + j.lines.map(c => `<span class="pill" style="background:#${lineInfo[c].color}">${c}</span> ${lineInfo[c].name}`).join('<br>');
-    tip.style.left = (e.clientX + 14) + 'px'; tip.style.top = (e.clientY + 14) + 'px'; tip.style.display = 'block';
+    tip.style.left = Math.min(x + 14, innerWidth - 220) + 'px'; tip.style.top = (y + 14) + 'px'; tip.style.display = 'block';
   } else tip.style.display = 'none';
+}
+function twoFingers() {
+  const [a, b] = [...pts.values()];
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, d: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)) };
+}
+function startPinch() { pinch = { ...twoFingers(), X: cssX, Y: cssY, S: cssS }; }
+wrap.addEventListener('pointerdown', (e) => {
+  if (settleTimer) { clearTimeout(settleTimer); settleTimer = 0; }   // ホイールの途中なら、その見た目から続ける
+  pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  wrap.setPointerCapture(e.pointerId); wrap.classList.add('drag'); tip.style.display = 'none';
+  if (pts.size === 1) { drag = { x: e.clientX, y: e.clientY }; tap = { x: e.clientX, y: e.clientY }; }
+  else { tap = null; if (pts.size === 2) startPinch(); }
 });
-const endDrag = () => { if (!drag) return; drag = null; wrap.classList.remove('drag'); settle(); };
-wrap.addEventListener('pointerup', endDrag);
-wrap.addEventListener('pointercancel', endDrag);
+wrap.addEventListener('pointermove', (e) => {
+  if (!pts.has(e.pointerId)) { if (e.pointerType === 'mouse') showTip(e.clientX, e.clientY); return; }
+  pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (tap && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) > 8) tap = null;
+  if (pinch && pts.size >= 2) {
+    // ピンチを始めたときに 2 本指の真ん中にあった点を、いまの真ん中に置く
+    const m = twoFingers(), k = m.d / pinch.d;
+    cssS = pinch.S * k; cssX = m.x - (pinch.x - pinch.X) * k; cssY = m.y - (pinch.y - pinch.Y) * k;
+    applyCss();
+  } else if (drag) {
+    cssX += e.clientX - drag.x; cssY += e.clientY - drag.y; drag = { x: e.clientX, y: e.clientY };
+    applyCss();
+  }
+});
+function endPointer(e) {
+  if (!pts.has(e.pointerId)) return;
+  pts.delete(e.pointerId);
+  if (pts.size === 1) {            // ピンチから 1 本指に戻ったら、残った指でドラッグを続ける
+    pinch = null; const [p] = [...pts.values()]; drag = { x: p.x, y: p.y };
+  } else if (pts.size === 0) {
+    drag = pinch = null; wrap.classList.remove('drag');
+    const t = tap; tap = null;
+    settle();
+    if (t && e.type === 'pointerup') showTip(t.x, t.y);
+  } else startPinch();
+}
+wrap.addEventListener('pointerup', endPointer);
+wrap.addEventListener('pointercancel', endPointer);
 wrap.addEventListener('wheel', (e) => {
   e.preventDefault();
   const f = Math.exp(-e.deltaY * 0.0015);
-  const s = pxScale();
-  // 先に溜まっている移動を反映してから、拡大の中心を決める
-  if (pendingZoom) { pendingZoom.f *= f; } else pendingZoom = { f, x: e.clientX * s, y: e.clientY * s };
   // CSS では、カーソル位置を中心に拡大して見せる
   cssX = e.clientX - (e.clientX - cssX) * f; cssY = e.clientY - (e.clientY - cssY) * f; cssS *= f;
-  cv.style.transform = `translate(${cssX}px, ${cssY}px) scale(${cssS})`;
+  applyCss();
   clearTimeout(settleTimer);
   settleTimer = setTimeout(() => { settleTimer = 0; settle(); }, 160);
 }, { passive: false });

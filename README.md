@@ -4,6 +4,7 @@
 地図は「実際の地図」と「路線図」の 2 種類で、ボタンを押すと駅がなめらかに動いて変形します。
 
 **デモ**: https://yomei-o.github.io/metro_map_cpp/
+（ドラッグで移動、ホイールまたは 2 本指のピンチで拡大縮小、駅をタップ・マウスを乗せると駅名と路線。スマホでも同じ大きさの文字になるよう、画面の倍率に合わせて文字と線を太くしています）
 
 描画はすべて C++（線・光・円・日本語の文字まで自前のソフトウェア描画）です。ブラウザでは WebAssembly にして、できた RGBA を canvas に貼るだけです。
 同じ `metro_map.hpp` をネイティブでビルドすると、同じ絵を PNG に書き出せます（`metro_map.exe`）。
@@ -52,3 +53,4 @@ python tools/subset_font.py NotoSansJP[wght].ttf data/network.txt fonts/NotoSans
 - 線路と駅: 「国土数値情報（鉄道データ）」（国土交通省）N02-24 を加工して作成（CC BY 4.0）。`data/network.txt`、`docs/network.txt`
 - 文字: Noto Sans JP（SIL Open Font License 1.1、`fonts/OFL.txt`）。駅名に使う 350 文字に絞り、太さ 700 に固定したもの
 - stb_truetype / stb_image_write: パブリックドメイン（または MIT）
+- nlohmann/json 3.12.0（`third_party/nlohmann/json.hpp`）: MIT。ODPT の列車ロケーション（JSON）を C++ 側で読むために入れてある
