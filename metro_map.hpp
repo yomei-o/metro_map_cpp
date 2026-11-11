@@ -17,6 +17,7 @@
 
 #include "layout.hpp"
 #include "network.hpp"
+#include "odpt.hpp"
 #include "raster.hpp"
 
 namespace mm {
@@ -29,6 +30,12 @@ struct Train {
     bool live = false;   // ODPT から来た列車か（仮の列車なら false）
     std::string label;   // 行き先など（表示用）
     int prev_edge = -1, prev_dir = 1;   // 1 つ前の区間（尾をそこまで伸ばすため）
+    // ODPT の列車だけが使う
+    std::string id, number, dest;
+    double delay = 0;
+    int from = -1, to = -1;      // to = -1 は from の駅にいる。それ以外は from → to を走っている
+    double p0 = 0, t0 = 0, rate = 0;   // 走っている割合 p = p0 + (wall - t0) * rate
+    bool confirmed = false;      // to に着いたことがわかっている（なら最後まで進めてよい。わからなければ手前で待つ）
 };
 
 struct Map {
@@ -42,7 +49,11 @@ struct Map {
     std::vector<Train> trains;
     double sim_speed = 8;                 // 仮の列車の早送り倍率
     double clock = 0;
+    double wall = 0;                      // いまの時刻（UNIX 秒）。ODPT の列車はこれで動かす
     bool simulate = true;
+    OdptTable odpt;
+    std::vector<char> live_line;          // ODPT の列車に置き換えた路線（仮の列車は出さない）
+    int live_count = 0;                   // いま地図に載っている ODPT の列車の数
     Canvas base, glow, frame;
     std::vector<uint8_t> rgba;
     bool dirty = true;
@@ -270,6 +281,12 @@ struct Map {
             mode = mode < target ? std::min(target, mode + step) : std::max(target, mode - step);
             dirty = true;
         }
+        for (auto& t : trains) {
+            if (!t.live || t.to < 0) continue;
+            double p = live_p(t);
+            if (t.confirmed && p >= 1) { place_at(t, t.to); continue; }
+            t.t = t.dir > 0 ? p : 1 - p;
+        }
         if (!simulate) return;
         double sdt = dt * sim_speed;
         for (auto& t : trains) {
@@ -281,6 +298,92 @@ struct Map {
             if (t.t > 1 || t.t < 0) { t.t = std::clamp(t.t, 0.0, 1.0); advance(t); }
         }
     }
+    // ---- ODPT の列車 ----
+    // ODPT が教えてくれるのは「どの駅にいるか」「どの駅とどの駅のあいだにいるか」だけで、更新は約 30 秒ごと。
+    // 駅のあいだの位置は、時刻表から出した区間の所要時間（data/odpt_toei.txt の run）で進める。
+    //   - あいだにいると言われた: 所要時間で進める。着いたと言われるまでは 97% の手前で待つ
+    //   - 着いたと言われた: 残りを数秒で進めて駅に止める
+    //   - 前の駅から次の駅へ、あいだを見ないまま移っていた: 遅れを取り戻すよう早めに走らせる
+    int load_odpt(const std::string& table_text) { return odpt.load(table_text, net); }
+
+    double live_p(const Train& t) const { return std::clamp(t.p0 + (wall - t.t0) * t.rate, 0.0, t.confirmed ? 1.0 : 0.97); }
+
+    // 駅 n に止める。置く辺は、なるべくいまの辺（着いた区間）に
+    void place_at(Train& t, int n) {
+        int e = -1;
+        auto touches = [&](int f) { return f >= 0 && f < (int)net.edges.size() && net.edges[f].line == t.line && (net.edges[f].a == n || net.edges[f].b == n); };
+        if (touches(t.edge)) e = t.edge;
+        if (e < 0) for (int f : net.lines[t.line].edges) if (touches(f)) { e = f; break; }
+        if (e < 0) return;
+        t.edge = e; t.dir = net.edges[e].b == n ? 1 : -1; t.t = t.dir > 0 ? 1 : 0;
+        t.from = n; t.to = -1; t.dwell = 1; t.confirmed = false;
+    }
+    // a → b を走り始める。いまの辺が a につながっていれば、それを尾のための 1 つ前の区間にする
+    bool begin_move(Train& t, int a, int b, double p0, double rate, bool confirmed) {
+        int e = net.edge_of(t.line, a, b);
+        if (e < 0) return false;
+        if (t.edge >= 0 && t.edge != e && (net.edges[t.edge].a == a || net.edges[t.edge].b == a)) { t.prev_edge = t.edge; t.prev_dir = net.edges[t.edge].b == a ? 1 : -1; }
+        else t.prev_edge = -1;
+        t.edge = e; t.dir = net.edges[e].a == a ? 1 : -1;
+        t.from = a; t.to = b; t.p0 = p0; t.t0 = wall; t.rate = rate; t.confirmed = confirmed; t.dwell = 0;
+        t.t = t.dir > 0 ? p0 : 1 - p0;
+        return true;
+    }
+    // odpt:Train の JSON を反映する。戻り値は地図に載った ODPT の列車の数
+    int apply_odpt(const std::string& json_text) {
+        if (odpt.empty()) return 0;
+        auto obs = parse_odpt_trains(json_text, odpt);
+        live_line.assign(net.lines.size(), 0);
+        for (auto& kv : odpt.railway) live_line[kv.second] = 1;
+        std::map<std::string, Train> old;
+        std::vector<Train> next;
+        for (auto& t : trains) {
+            if (t.live) old[t.id] = t;
+            else if (!live_line[t.line]) next.push_back(t);
+        }
+        for (auto& o : obs) {
+            auto it = old.find(o.id);
+            bool known = it != old.end() && it->second.line == o.line;
+            Train t;
+            if (known) t = it->second;
+            else { t.live = true; t.id = o.id; t.line = o.line; t.edge = -1; }
+            t.number = o.number; t.dest = o.dest; t.delay = o.delay;
+            if (o.to >= 0) {
+                if (!(known && t.from == o.from && t.to == o.to)) {
+                    double r = odpt.run_time(o.line, o.from, o.to, 90);
+                    bool ok = known && t.to < 0 && t.from == o.from
+                        ? begin_move(t, o.from, o.to, 0, 1 / std::max(20.0, r - 15), false)   // 駅にいた列車が出た（この 30 秒のどこかで）
+                        : begin_move(t, o.from, o.to, std::min(0.5, 15 / r), 1 / r, false);   // 初めて見た／途中が飛んだ
+                    if (!ok) place_at(t, o.from);
+                }
+            } else if (known && t.to == o.from) {   // 走ってきて着いた
+                double p = live_p(t);
+                t.p0 = p; t.t0 = wall; t.rate = std::max(t.rate, (1 - p) / 6); t.confirmed = true;
+            } else if (known && t.to < 0 && t.from != o.from && net.edge_of(o.line, t.from, o.from) >= 0) {   // あいだを見ないまま隣の駅へ
+                double r = odpt.run_time(o.line, t.from, o.from, 90);
+                begin_move(t, t.from, o.from, 0, 1 / std::min(r, 25.0), true);
+            } else if (!(known && t.to < 0 && t.from == o.from)) {
+                place_at(t, o.from);
+            }
+            if (t.edge < 0) continue;
+            next.push_back(t);
+        }
+        trains.swap(next);
+        live_count = 0;
+        for (auto& t : trains) live_count += t.live;
+        return live_count;
+    }
+    // 画面上の点に近い列車（px）。無ければ -1
+    int pick_train(double sx, double sy, double maxd = 12) const {
+        int best = -1; double bd = maxd;
+        for (size_t i = 0; i < trains.size(); ++i) {
+            V2 p = train_pos(trains[i]);
+            double d = std::hypot(p.x - sx, p.y - sy);
+            if (d < bd) { bd = d; best = (int)i; }
+        }
+        return best;
+    }
+
     // 辺の上の位置（画面座標）
     V2 train_pos(const Train& t) const {
         auto shape = edge_shape(t.edge);

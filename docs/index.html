@@ -37,7 +37,7 @@ button.on { background: var(--accent); color: #04121f; border-color: var(--accen
     <button id="mGeo" class="on">実際の地図</button>
     <button id="mSch">路線図</button>
     <button id="fit">全体を表示</button>
-    <select id="speed" title="仮の列車の速さ">
+    <select id="speed" title="メトロ（仮の列車）の速さ">
       <option value="1">等速</option>
       <option value="8" selected>8 倍速</option>
       <option value="30">30 倍速</option>
@@ -46,7 +46,10 @@ button.on { background: var(--accent); color: #04121f; border-color: var(--accen
 </div>
 <div class="panel" id="legend"></div>
 <div class="panel" id="tip"></div>
-<div class="panel" id="note">いまの列車は仮のもの（ODPT の承認待ち）。光る頭と尾が列車で、尾の反対側へ進んでいます。ドラッグで移動、ホイール・2 本指で拡大縮小、駅をタップで名前。<br>
+<div class="panel" id="note"><b>都営 4 路線</b>（浅草・三田・新宿・大江戸）の列車は、いま実際に走っている列車の位置（ODPT、約 30 秒ごとに更新）。駅と駅のあいだは時刻表の所要時間で進めています。<b>メトロ 9 路線</b>の列車は、まだ仮のものです（ODPT の承認待ち）。
+光る頭と尾が列車で、尾の反対側へ進んでいます。ドラッグで移動、ホイール・2 本指で拡大縮小、駅や列車をタップで名前・行き先。<br>
+列車の位置（都営）：公共交通オープンデータセンター（ODPT）を通じて東京都交通局が提供するデータを使用。内容の正確さ・完全さは保証されません／
+
 線路と駅：「国土数値情報（鉄道データ）」（国土交通省）を加工して作成（CC BY 4.0）／ 文字：Noto Sans JP（SIL OFL 1.1）</div>
 
 <script src="mm.js"></script>
@@ -88,7 +91,7 @@ let last = performance.now();
 function frame(now) {
   const dt = Math.min(0.1, (now - last) / 1000); last = now;
   if (!pts.size && !settleTimer) {
-    M._mm_tick(dt);
+    M._mm_tick(dt, Date.now() / 1000);
     const p = M._mm_render();
     img.data.set(M.HEAPU8.subarray(p, p + W * H * 4));
     ctx.putImageData(img, 0, 0);
@@ -102,7 +105,13 @@ function showTip(x, y) {
   if (!M) return;
   const s = pxScale();
   const j = JSON.parse(M.UTF8ToString(M._mm_pick(x * s, y * s)));
-  if (j.name) {
+  if (j.train !== undefined) {
+    const L = lineInfo[j.line];
+    const delay = !j.live ? '仮の列車' : j.delay >= 60 ? `${Math.round(j.delay / 60)} 分遅れ` : '遅れなし';
+    tip.innerHTML = `<span class="pill" style="background:#${L.color}">${j.line}</span> <b>${L.name}</b>` +
+      (j.live ? `<br>${j.dest ? j.dest + ' 行き・' : ''}${j.train}<br>${delay}` : `<br>${delay}`);
+    tip.style.left = Math.min(x + 14, innerWidth - 220) + 'px'; tip.style.top = (y + 14) + 'px'; tip.style.display = 'block';
+  } else if (j.name) {
     tip.innerHTML = `<b>${j.name}</b><br>` + j.lines.map(c => `<span class="pill" style="background:#${lineInfo[c].color}">${c}</span> ${lineInfo[c].name}`).join('<br>');
     tip.style.left = Math.min(x + 14, innerWidth - 220) + 'px'; tip.style.top = (y + 14) + 'px'; tip.style.display = 'block';
   } else tip.style.display = 'none';
@@ -157,6 +166,27 @@ wrap.addEventListener('wheel', (e) => {
   settleTimer = setTimeout(() => { settleTimer = 0; settle(); }, 160);
 }, { passive: false });
 
+// ---- 都営の列車（ODPT） ----
+const ODPT_URL = 'https://api-public.odpt.org/api/v4/odpt:Train?odpt:operator=odpt.Operator:Toei';
+let baseStatus = '', pollTimer = 0;
+async function pollTrains() {
+  clearTimeout(pollTimer);
+  if (document.hidden) return;
+  try {
+    const r = await fetch(ODPT_URL, { cache: 'no-store' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const js = await r.text();
+    const n = M.lengthBytesUTF8(js) + 1, p = M._malloc(n); M.stringToUTF8(js, p, n);
+    const live = M._mm_odpt(p, Date.now() / 1000); M._free(p);
+    const t = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    statusEl.textContent = `${baseStatus} ・ 都営の列車 ${live} 本（${t} 更新）`;
+  } catch (e) {
+    statusEl.textContent = `${baseStatus} ・ 都営の列車を取れませんでした（${e.message}）。30 秒後にもう一度`;
+  }
+  pollTimer = setTimeout(pollTrains, 30000);
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden && M) pollTrains(); });
+
 const mGeo = document.getElementById('mGeo'), mSch = document.getElementById('mSch');
 mGeo.onclick = () => { M._mm_mode(0); mGeo.classList.add('on'); mSch.classList.remove('on'); };
 mSch.onclick = () => { M._mm_mode(1); mSch.classList.add('on'); mGeo.classList.remove('on'); };
@@ -176,9 +206,15 @@ addEventListener('resize', () => { if (M) { size(); M._mm_fit(); } });
   const lines = JSON.parse(M.UTF8ToString(M._mm_lines()));
   lines.forEach(l => lineInfo[l.code] = l);
   document.getElementById('legend').innerHTML = lines.map(l => `<div><span class="pill" style="background:#${l.color}">${l.code}</span>${l.name}</div>`).join('');
-  statusEl.textContent = `${lines.length} 路線・${stations} 駅（乗換駅は 1 つにまとめて数える）`;
+  baseStatus = `${lines.length} 路線・${stations} 駅`;
+  statusEl.textContent = baseStatus;
   size(); M._mm_fit();
   requestAnimationFrame(frame);
+  // 都営の列車：ODPT の公開用 API（キー無し）から 30 秒ごとに取る。タブが見えていないあいだは止める
+  const table = await fetch('odpt_toei.txt').then(r => r.text());
+  const tn = M.lengthBytesUTF8(table) + 1, tt = M._malloc(tn); M.stringToUTF8(table, tt, tn);
+  M._mm_odpt_table(tt); M._free(tt);
+  pollTrains();
 })().catch(err => statusEl.textContent = '読み込みに失敗: ' + err);
 </script>
 </body>

@@ -1,5 +1,6 @@
 // metro_map — ネイティブで地図を PNG に描く（WASM と同じ metro_map.hpp）
-//   metro_map [data/network.txt] [fonts/NotoSansJP-Bold-subset.ttf] [out_prefix] [W] [H]
+//   metro_map [data/network.txt] [fonts/NotoSansJP-Bold-subset.ttf] [out_prefix] [W] [H] [data/odpt_toei.txt train1.json train2.json ...]
+//   列車の JSON（odpt:Train）を渡すと、30 秒おきに届いたものとして順に反映し、その都度の様子を表示する
 //   → <out>_geo.png（実際の地図風）, <out>_mid.png（変形の途中）, <out>_sch.png（路線図風）
 #define _CRT_SECURE_NO_WARNINGS
 #include <chrono>
@@ -35,6 +36,18 @@ int main(int argc, char** argv) {
     m.resize(W, H);
     m.fit();
     for (int k = 0; k < 60; ++k) m.tick(0.5);   // 列車を少し走らせて、尾が出るように
+    if (argc > 6) {
+        int bad = m.load_odpt(read_all(argv[6]));
+        printf("odpt: %zu railways, %zu stations, %zu runs, %d unmatched\n", m.odpt.railway.size(), m.odpt.station.size(), m.odpt.run_l.size(), bad);
+        m.wall = 1.7e9;
+        for (int a = 7; a < argc; ++a) {
+            int n = m.apply_odpt(read_all(argv[a]));
+            int moving = 0, at = 0;
+            for (auto& t : m.trains) if (t.live) (t.to >= 0 ? moving : at)++;
+            printf("  %s: %d live trains (%d moving, %d at station), %zu total\n", argv[a], n, moving, at, m.trains.size());
+            for (int k = 0; k < (a + 1 < argc ? 60 : 30); ++k) { m.wall += 0.5; m.tick(0.5); }
+        }
+    }
     struct Shot { const char* name; double mode; };
     for (Shot s : {Shot{"geo", 0.0}, Shot{"mid", 0.5}, Shot{"sch", 1.0}}) {
         m.mode = m.target = s.mode;

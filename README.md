@@ -9,8 +9,22 @@
 描画はすべて C++（線・光・円・日本語の文字まで自前のソフトウェア描画）です。ブラウザでは WebAssembly にして、できた RGBA を canvas に貼るだけです。
 同じ `metro_map.hpp` をネイティブでビルドすると、同じ絵を PNG に書き出せます（`metro_map.exe`）。
 
-> **いまの列車は仮のものです。** 列車の位置は、公共交通オープンデータセンター（ODPT）の列車ロケーション情報で取る予定です。
-> 開発者登録の承認待ちのあいだは、それらしく走る仮の列車（区間を約 40 km/h で走り、駅で 25 秒止まる）を使っています。
+**都営 4 路線（浅草・三田・新宿・大江戸）の列車は、いま実際に走っている列車です。** 公共交通オープンデータセンター（ODPT）の列車ロケーション情報（`odpt:Train`）を、ブラウザから約 30 秒ごとに取っています。
+都営のデータはキー無しの公開用 API（`https://api-public.odpt.org/api/v4/`、`Access-Control-Allow-Origin: *`）で取れるので、公開ページにキーを置かずに済みます。
+
+> **東京メトロ 9 路線の列車は、まだ仮のものです。** メトロのデータはキーの要る API にしか無く（公開用 API では `[]` が返る）、開発者登録の承認待ちです。
+> それまでは、それらしく走る仮の列車（区間を約 40 km/h で走り、駅で 25 秒止まる）を使っています。
+
+### 都営の列車の動かし方
+
+ODPT が教えてくれるのは「どの駅にいるか（`toStation` が null）」「どの駅とどの駅のあいだにいるか」だけで、更新は約 30 秒ごとです。
+あいだの位置は、時刻表（`odpt:TrainTimetable`）から出した区間の平均の所要時間（`data/odpt_toei.txt` の `run`）で進めます。
+
+- あいだにいると言われた → 所要時間で進める。着いたと言われるまでは 97% の手前で待つ
+- 着いたと言われた → 残りを数秒で進めて駅に止める
+- 前の駅から次の駅へ、あいだを見ないまま移っていた（更新の 30 秒のうちに走り終えた） → 遅れを取り戻すよう早めに走らせる
+- 直通先（京急・京成・北総・東急・相鉄など）を走っている列車は、地図に無いので出さない（2026-11-11 夕方で約 120 本中 95 本ほどが地図に載る）
+- 駅名は ODPT の `odpt:Railway` の駅の並びの日本語名で、地図（国土数値情報）の駅名と 4 路線とも全部一致した。直通先の行き先 29 駅の名前は `tools/build_odpt_toei.py` に表で持つ（他社の駅のデータはキー無しでは取れない）
 
 ## しくみ
 
@@ -20,7 +34,9 @@
 | `network.hpp` | 経緯度をメルカトル図法に投影し、同じ名前の近い駅を 1 つの乗換駅にまとめる。路線の線路全体を 20 m おきの点の網にして、各駅から網に沿って隣の駅を探し、駅と駅のあいだ（区間）とその線路の形を作る |
 | `layout.hpp` | 路線図の配置を計算する。実際の位置に魚眼をかけて都心を広げた位置を出発点に、「区間の向きを 0°/45°/90° に寄せる」「駅の間隔をそろえる」「途中駅でまっすぐ通す」「無関係な駅を離す」を少しずつ同時にかける（乱数なし、毎回同じ結果） |
 | `raster.hpp` | なめらかな太線（継ぎ目が濃くならない）、円、光（縮めてぼかして足す）、stb_truetype の日本語（暗い縁取りつき） |
-| `metro_map.hpp` | 2 種類の地図の描画と変形、駅名の配置（乗換駅が先、重ならない場所へ）、列車と流れ星の尾 |
+| `tools/build_odpt_toei.py` | ODPT の都営の路線・時刻表から、駅の対応と区間の所要時間を `data/odpt_toei.txt` に取り出す |
+| `odpt.hpp` | `data/odpt_toei.txt` を読み、`odpt:Train` の JSON（nlohmann/json）を地図の駅・路線に結びつける |
+| `metro_map.hpp` | 2 種類の地図の描画と変形、駅名の配置（乗換駅が先、重ならない場所へ）、列車と流れ星の尾、ODPT の列車の動かし方 |
 | `wasm/` | ブラウザ用の入口とビルド |
 
 - 区間の形は、変形の途中では「実際の線路の形」と「路線図の形」を同じ点の数に取り直して、そのあいだを補間します。
@@ -38,6 +54,8 @@ cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
 build/Release/metro_map.exe data/network.txt fonts/NotoSansJP-Bold-subset.ttf out/map 1280 800   # out/map_geo.png, _mid, _sch
 sh wasm/build.sh                                                                                 # docs/mm.js, docs/mm.wasm
+# 取っておいた odpt:Train の JSON を 30 秒おきに届いたものとして流して、様子を見る
+build/Release/metro_map.exe data/network.txt fonts/NotoSansJP-Bold-subset.ttf out/live 1280 800 data/odpt_toei.txt t1.json t2.json ...
 ```
 
 データを作り直すとき（国土数値情報を `data/raw/` に置いて）:
@@ -45,12 +63,16 @@ sh wasm/build.sh                                                                
 ```sh
 python tools/build_network.py data/raw/n02/UTF-8/N02-24_RailroadSection.geojson data/raw/n02/UTF-8/N02-24_Station.geojson > data/network.txt
 python tools/subset_font.py NotoSansJP[wght].ttf data/network.txt fonts/NotoSansJP-Bold-subset.ttf
+# ODPT（キー無し）から rw.json と tt_{Asakusa,Mita,Shinjuku,Oedo}.json を <dir> に取ってから（取り方はスクリプトの先頭）
+python tools/build_odpt_toei.py <dir> > data/odpt_toei.txt
 ```
+時刻表が改正されたら `data/odpt_toei.txt` を作り直すと、区間の所要時間が新しくなります（いまのものは 2026-11-11 に取った時刻表から）。
 
 ## 出典とライセンス
 
 - コード: BSD-3-Clause（`LICENSE`）
 - 線路と駅: 「国土数値情報（鉄道データ）」（国土交通省）N02-24 を加工して作成（CC BY 4.0）。`data/network.txt`、`docs/network.txt`
+- 列車の位置・時刻表（都営）: 公共交通オープンデータセンター（ODPT）を通じて東京都交通局が提供するデータを使用。`data/odpt_toei.txt` はそれを加工したもの。内容の正確さ・完全さは保証されません
 - 文字: Noto Sans JP（SIL Open Font License 1.1、`fonts/OFL.txt`）。駅名に使う 350 文字に絞り、太さ 700 に固定したもの
 - stb_truetype / stb_image_write: パブリックドメイン（または MIT）
 - nlohmann/json 3.12.0（`third_party/nlohmann/json.hpp`）: MIT。ODPT の列車ロケーション（JSON）を C++ 側で読むために入れてある

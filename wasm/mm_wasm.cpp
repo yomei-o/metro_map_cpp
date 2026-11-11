@@ -21,7 +21,11 @@ EMSCRIPTEN_KEEPALIVE void mm_zoom(double f, double x, double y) { g.zoom(f, x, y
 EMSCRIPTEN_KEEPALIVE void mm_mode(int m) { g.set_mode(m); }
 EMSCRIPTEN_KEEPALIVE void mm_ui(double u) { g.ui = u; g.dirty = true; }
 EMSCRIPTEN_KEEPALIVE void mm_speed(double s) { g.sim_speed = s; }
-EMSCRIPTEN_KEEPALIVE void mm_tick(double dt) { g.tick(dt); }
+EMSCRIPTEN_KEEPALIVE void mm_tick(double dt, double wall) { g.wall = wall; g.tick(dt); }
+// ODPT: 駅と所要時間の表（data/odpt_toei.txt）を読む。戻り値は地図に結びつかなかった行の数
+EMSCRIPTEN_KEEPALIVE int mm_odpt_table(const char* text) { return g.load_odpt(text); }
+// ODPT: odpt:Train の JSON を反映する。戻り値は地図に載った列車の数
+EMSCRIPTEN_KEEPALIVE int mm_odpt(const char* json, double wall) { g.wall = wall; return g.apply_odpt(json); }
 EMSCRIPTEN_KEEPALIVE const uint8_t* mm_render() { return g.render(); }
 // 路線の一覧（凡例用）: [{"code":"G","name":"銀座線","color":"FF9500"},...]
 EMSCRIPTEN_KEEPALIVE const char* mm_lines() {
@@ -34,8 +38,16 @@ EMSCRIPTEN_KEEPALIVE const char* mm_lines() {
     }
     return (g_json += "]").c_str();
 }
-// 画面上の点に近い駅: {"name":"大手町","lines":["M","T",...]} または {}
+static std::string esc(const std::string& s) { std::string o; for (char c : s) { if (c == '"' || c == '\\') o += '\\'; o += c; } return o; }
+// 画面上の点に近い列車または駅
+//   {"train":"1579T","line":"I","dest":"西高島平","delay":0,"live":1} / {"name":"大手町","lines":["M","T",...]} / {}
 EMSCRIPTEN_KEEPALIVE const char* mm_pick(double x, double y) {
+    int ti = g.pick_train(x, y, 10 * g.ui);
+    if (ti >= 0) {
+        auto& t = g.trains[ti];
+        char b[64]; snprintf(b, sizeof b, ",\"delay\":%d,\"live\":%d}", (int)t.delay, t.live ? 1 : 0);
+        return (g_json = "{\"train\":\"" + esc(t.number) + "\",\"line\":\"" + std::string(1, g.net.lines[t.line].code) + "\",\"dest\":\"" + esc(t.dest) + "\"" + b).c_str();
+    }
     int n = g.pick(x, y);
     if (n < 0) return (g_json = "{}").c_str();
     g_json = "{\"name\":\"" + g.net.nodes[n].name + "\",\"lines\":[";

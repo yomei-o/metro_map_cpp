@@ -11,4 +11,5 @@ EMCC="$EMSDK/upstream/emscripten/emcc.exe"
   wasm/mm_wasm.cpp -o docs/mm.js
 cp data/network.txt docs/network.txt
 cp fonts/NotoSansJP-Bold-subset.ttf docs/font.ttf
+cp data/odpt_toei.txt docs/odpt_toei.txt
 echo "built docs/mm.js"
