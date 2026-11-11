@@ -37,11 +37,6 @@ button.on { background: var(--accent); color: #04121f; border-color: var(--accen
     <button id="mGeo" class="on">実際の地図</button>
     <button id="mSch">路線図</button>
     <button id="fit">全体を表示</button>
-    <select id="speed" title="メトロ（仮の列車）の速さ">
-      <option value="1">等速</option>
-      <option value="8" selected>8 倍速</option>
-      <option value="30">30 倍速</option>
-    </select>
   </div>
 </div>
 <div class="panel" id="legend"></div>
@@ -191,7 +186,6 @@ const mGeo = document.getElementById('mGeo'), mSch = document.getElementById('mS
 mGeo.onclick = () => { M._mm_mode(0); mGeo.classList.add('on'); mSch.classList.remove('on'); };
 mSch.onclick = () => { M._mm_mode(1); mSch.classList.add('on'); mGeo.classList.remove('on'); };
 document.getElementById('fit').onclick = () => M._mm_fit();
-document.getElementById('speed').onchange = (e) => M._mm_speed(+e.target.value);
 addEventListener('resize', () => { if (M) { size(); M._mm_fit(); } });
 
 (async () => {

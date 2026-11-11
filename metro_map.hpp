@@ -47,7 +47,7 @@ struct Map {
     double scale = 1;                     // 1 km あたりの px
     double ui = 1;                        // 描画 px と画面の px の比（スマホは 1.5 など）。文字と線の最小の太さに掛ける
     std::vector<Train> trains;
-    double sim_speed = 8;                 // 仮の列車の早送り倍率
+    double sim_speed = 1;                 // 仮の列車の速さの倍率（1 = 実時間。ODPT の列車と並べるので実時間のまま）
     double clock = 0;
     double wall = 0;                      // いまの時刻（UNIX 秒）。ODPT の列車はこれで動かす
     bool simulate = true;
