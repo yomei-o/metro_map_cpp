@@ -1,5 +1,6 @@
 # 出典: 公共交通オープンデータセンター（ODPT）の東京都交通局のデータを加工して作成
 railway odpt.Railway:Toei.Asakusa A
+order odpt.Railway:Toei.Asakusa odpt.RailDirection:Northbound odpt.Station:Toei.Asakusa.NishiMagome odpt.Station:Toei.Asakusa.Magome odpt.Station:Toei.Asakusa.Nakanobu odpt.Station:Toei.Asakusa.Togoshi odpt.Station:Toei.Asakusa.Gotanda odpt.Station:Toei.Asakusa.Takanawadai odpt.Station:Toei.Asakusa.Sengakuji odpt.Station:Toei.Asakusa.Mita odpt.Station:Toei.Asakusa.Daimon odpt.Station:Toei.Asakusa.Shimbashi odpt.Station:Toei.Asakusa.HigashiGinza odpt.Station:Toei.Asakusa.Takaracho odpt.Station:Toei.Asakusa.Nihombashi odpt.Station:Toei.Asakusa.Ningyocho odpt.Station:Toei.Asakusa.HigashiNihombashi odpt.Station:Toei.Asakusa.Asakusabashi odpt.Station:Toei.Asakusa.Kuramae odpt.Station:Toei.Asakusa.Asakusa odpt.Station:Toei.Asakusa.HonjoAzumabashi odpt.Station:Toei.Asakusa.Oshiage
 station odpt.Station:Toei.Asakusa.NishiMagome A 西馬込
 station odpt.Station:Toei.Asakusa.Magome A 馬込
 station odpt.Station:Toei.Asakusa.Nakanobu A 中延
@@ -21,6 +22,7 @@ station odpt.Station:Toei.Asakusa.Asakusa A 浅草
 station odpt.Station:Toei.Asakusa.HonjoAzumabashi A 本所吾妻橋
 station odpt.Station:Toei.Asakusa.Oshiage A 押上
 railway odpt.Railway:Toei.Mita I
+order odpt.Railway:Toei.Mita odpt.RailDirection:Northbound odpt.Station:Toei.Mita.Meguro odpt.Station:Toei.Mita.Shirokanedai odpt.Station:Toei.Mita.ShirokaneTakanawa odpt.Station:Toei.Mita.Mita odpt.Station:Toei.Mita.Shibakoen odpt.Station:Toei.Mita.Onarimon odpt.Station:Toei.Mita.Uchisaiwaicho odpt.Station:Toei.Mita.Hibiya odpt.Station:Toei.Mita.Otemachi odpt.Station:Toei.Mita.Jimbocho odpt.Station:Toei.Mita.Suidobashi odpt.Station:Toei.Mita.Kasuga odpt.Station:Toei.Mita.Hakusan odpt.Station:Toei.Mita.Sengoku odpt.Station:Toei.Mita.Sugamo odpt.Station:Toei.Mita.NishiSugamo odpt.Station:Toei.Mita.ShinItabashi odpt.Station:Toei.Mita.ItabashiKuyakushomae odpt.Station:Toei.Mita.Itabashihoncho odpt.Station:Toei.Mita.Motohasunuma odpt.Station:Toei.Mita.ShimuraSakaue odpt.Station:Toei.Mita.ShimuraSanchome odpt.Station:Toei.Mita.Hasune odpt.Station:Toei.Mita.Nishidai odpt.Station:Toei.Mita.Takashimadaira odpt.Station:Toei.Mita.ShinTakashimadaira odpt.Station:Toei.Mita.NishiTakashimadaira
 station odpt.Station:Toei.Mita.Meguro I 目黒
 station odpt.Station:Toei.Mita.Shirokanedai I 白金台
 station odpt.Station:Toei.Mita.ShirokaneTakanawa I 白金高輪
@@ -49,6 +51,7 @@ station odpt.Station:Toei.Mita.Takashimadaira I 高島平
 station odpt.Station:Toei.Mita.ShinTakashimadaira I 新高島平
 station odpt.Station:Toei.Mita.NishiTakashimadaira I 西高島平
 railway odpt.Railway:Toei.Oedo E
+order odpt.Railway:Toei.Oedo odpt.RailDirection:OuterLoop odpt.Station:Toei.Oedo.Tochomae odpt.Station:Toei.Oedo.ShinjukuNishiguchi odpt.Station:Toei.Oedo.HigashiShinjuku odpt.Station:Toei.Oedo.WakamatsuKawada odpt.Station:Toei.Oedo.UshigomeYanagicho odpt.Station:Toei.Oedo.UshigomeKagurazaka odpt.Station:Toei.Oedo.Iidabashi odpt.Station:Toei.Oedo.Kasuga odpt.Station:Toei.Oedo.HongoSanchome odpt.Station:Toei.Oedo.UenoOkachimachi odpt.Station:Toei.Oedo.ShinOkachimachi odpt.Station:Toei.Oedo.Kuramae odpt.Station:Toei.Oedo.Ryogoku odpt.Station:Toei.Oedo.Morishita odpt.Station:Toei.Oedo.KiyosumiShirakawa odpt.Station:Toei.Oedo.MonzenNakacho odpt.Station:Toei.Oedo.Tsukishima odpt.Station:Toei.Oedo.Kachidoki odpt.Station:Toei.Oedo.Tsukijishijo odpt.Station:Toei.Oedo.Shiodome odpt.Station:Toei.Oedo.Daimon odpt.Station:Toei.Oedo.Akabanebashi odpt.Station:Toei.Oedo.AzabuJuban odpt.Station:Toei.Oedo.Roppongi odpt.Station:Toei.Oedo.AoyamaItchome odpt.Station:Toei.Oedo.KokuritsuKyogijo odpt.Station:Toei.Oedo.Yoyogi odpt.Station:Toei.Oedo.Shinjuku odpt.Station:Toei.Oedo.Tochomae odpt.Station:Toei.Oedo.NishiShinjukuGochome odpt.Station:Toei.Oedo.NakanoSakaue odpt.Station:Toei.Oedo.HigashiNakano odpt.Station:Toei.Oedo.Nakai odpt.Station:Toei.Oedo.OchiaiMinamiNagasaki odpt.Station:Toei.Oedo.ShinEgota odpt.Station:Toei.Oedo.Nerima odpt.Station:Toei.Oedo.Toshimaen odpt.Station:Toei.Oedo.NerimaKasugacho odpt.Station:Toei.Oedo.Hikarigaoka
 station odpt.Station:Toei.Oedo.Tochomae E 都庁前
 station odpt.Station:Toei.Oedo.ShinjukuNishiguchi E 新宿西口
 station odpt.Station:Toei.Oedo.HigashiShinjuku E 東新宿
@@ -88,6 +91,7 @@ station odpt.Station:Toei.Oedo.Toshimaen E 豊島園
 station odpt.Station:Toei.Oedo.NerimaKasugacho E 練馬春日町
 station odpt.Station:Toei.Oedo.Hikarigaoka E 光が丘
 railway odpt.Railway:Toei.Shinjuku S
+order odpt.Railway:Toei.Shinjuku odpt.RailDirection:Eastbound odpt.Station:Toei.Shinjuku.Shinjuku odpt.Station:Toei.Shinjuku.ShinjukuSanchome odpt.Station:Toei.Shinjuku.Akebonobashi odpt.Station:Toei.Shinjuku.Ichigaya odpt.Station:Toei.Shinjuku.Kudanshita odpt.Station:Toei.Shinjuku.Jimbocho odpt.Station:Toei.Shinjuku.Ogawamachi odpt.Station:Toei.Shinjuku.Iwamotocho odpt.Station:Toei.Shinjuku.BakuroYokoyama odpt.Station:Toei.Shinjuku.Hamacho odpt.Station:Toei.Shinjuku.Morishita odpt.Station:Toei.Shinjuku.Kikukawa odpt.Station:Toei.Shinjuku.Sumiyoshi odpt.Station:Toei.Shinjuku.NishiOjima odpt.Station:Toei.Shinjuku.Ojima odpt.Station:Toei.Shinjuku.HigashiOjima odpt.Station:Toei.Shinjuku.Funabori odpt.Station:Toei.Shinjuku.Ichinoe odpt.Station:Toei.Shinjuku.Mizue odpt.Station:Toei.Shinjuku.Shinozaki odpt.Station:Toei.Shinjuku.Motoyawata
 station odpt.Station:Toei.Shinjuku.Shinjuku S 新宿
 station odpt.Station:Toei.Shinjuku.ShinjukuSanchome S 新宿三丁目
 station odpt.Station:Toei.Shinjuku.Akebonobashi S 曙橋

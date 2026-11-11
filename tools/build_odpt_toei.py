@@ -9,6 +9,7 @@
 # 出力:
 #   railway odpt.Railway:Toei.Mita I                    ODPT の路線 → network.txt の路線記号
 #   station odpt.Station:Toei.Mita.Hakusan I 白山       ODPT の駅 → 路線記号と駅名（network.txt の名前と同じ）
+#   order <ODPT の路線> <駅の番号が増える向き> <駅1> <駅2> ...   駅の並び（odpt:stationOrder）。列車の向きから「1 つ後ろの駅」を出すのに使う
 #   run <駅A> <駅B> <秒>                                 A を出て B に着くまでの平均（時刻表の隣り合う停車駅から）
 #   dest <駅> <駅名>                                     直通先の行き先（他社の駅はキー無しでは名前が取れないので、下の表で）
 import json, os, sys
@@ -43,6 +44,8 @@ def main(d):
             continue
         c = CODE[key]
         out.append(f"railway {r['owl:sameAs']} {c}")
+        order = [s["odpt:station"] for s in sorted(r["odpt:stationOrder"], key=lambda s: s["odpt:index"])]
+        out.append(f"order {r['owl:sameAs']} {r['odpt:ascendingRailDirection']} " + " ".join(order))
         for s in r["odpt:stationOrder"]:
             if s["odpt:station"] in known:
                 continue

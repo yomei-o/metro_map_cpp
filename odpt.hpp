@@ -6,9 +6,10 @@
 //       station <ODPT の駅> <路線記号> <駅名>
 //       run <駅A> <駅B> <秒>            時刻表から出した A → B の平均の所要時間
 //       dest <駅> <駅名>                直通先の行き先の名前
+//       order <ODPT の路線> <駅の番号が増える向き> <駅1> <駅2> ...   駅の並び（列車の向きから「1 つ後ろの駅」を出す）
 //   odpt:Train の JSON（配列）。いまは都営だけがキー無しの公開用 API（api-public.odpt.org）で取れる。
 //       owl:sameAs（列車の ID）, odpt:railway, odpt:fromStation, odpt:toStation（駅にいるときは null）,
-//       odpt:delay（秒）, odpt:trainNumber, odpt:destinationStation
+//       odpt:delay（秒）, odpt:trainNumber, odpt:destinationStation, odpt:railDirection
 #pragma once
 #include <algorithm>
 #include <map>
@@ -28,6 +29,8 @@ struct OdptTable {
     std::map<std::string, std::string> station_name;        // ODPT の駅 → 駅名
     std::map<std::pair<int, int>, double> run;              // (ノード A, ノード B) → 秒（路線をまたいで同じ 2 駅なら最初のもの）
     std::map<std::pair<int, std::pair<int, int>>, double> run_l;   // (路線, (A, B)) → 秒
+    struct Order { std::string asc; std::vector<int> nodes; };      // 駅の並びと、番号が増える向き（odpt:RailDirection）
+    std::map<int, Order> order;                                       // 路線番号 → 駅の並び
 
     bool empty() const { return railway.empty(); }
 
@@ -36,6 +39,7 @@ struct OdptTable {
         int bad = 0;
         std::istringstream in(text);
         std::string ln;
+        std::vector<std::string> order_lines;   // 駅の行より前にあるので、最後に読む
         while (std::getline(in, ln)) {
             if (!ln.empty() && ln.back() == '\r') ln.pop_back();
             std::istringstream s(ln);
@@ -52,6 +56,8 @@ struct OdptTable {
                     if (net.nodes[i].name == name && std::find(net.nodes[i].lines.begin(), net.nodes[i].lines.end(), l) != net.nodes[i].lines.end()) { n = (int)i; break; }
                 if (n < 0) { ++bad; continue; }
                 station[id] = n; station_name[id] = name;
+            } else if (kind == "order") {
+                order_lines.push_back(ln);
             } else if (kind == "dest") {
                 std::string id, name; s >> id; std::getline(s >> std::ws, name);
                 if (!id.empty() && !name.empty()) station_name[id] = name;
@@ -64,6 +70,15 @@ struct OdptTable {
                 run.emplace(std::make_pair(ia->second, ib->second), sec);
             }
         }
+        for (auto& ol : order_lines) {
+            std::istringstream s(ol);
+            std::string kind, rw, asc, st; s >> kind >> rw >> asc;
+            auto it = railway.find(rw);
+            if (it == railway.end()) { ++bad; continue; }
+            Order o; o.asc = asc;
+            while (s >> st) { auto f = station.find(st); o.nodes.push_back(f == station.end() ? -1 : f->second); }
+            order[it->second] = o;
+        }
         return bad;
     }
     // "odpt.Station:Toei.Mita.Hakusan" → その路線の番号（"odpt.Railway:Toei.Mita" から引く）
@@ -72,6 +87,20 @@ struct OdptTable {
         if (c == std::string::npos || d == std::string::npos || d <= c) return -1;
         auto it = railway.find("odpt.Railway:" + st.substr(c + 1, d - c - 1));
         return it == railway.end() ? -1 : it->second;
+    }
+    // 路線 l の駅 n に、向き asc（1 = 番号が増える向き、0 = 減る向き）で来た列車の「1 つ後ろの駅」。わからなければ -1
+    // 同じ駅が並びに 2 回出る（大江戸線の都庁前）ときは、net に辺があるほうを使う
+    int behind(const Network& net, int l, int n, int asc) const {
+        auto it = order.find(l);
+        if (it == order.end() || asc < 0) return -1;
+        const auto& v = it->second.nodes;
+        for (size_t i = 0; i < v.size(); ++i) {
+            if (v[i] != n) continue;
+            long j = asc ? (long)i - 1 : (long)i + 1;
+            if (j < 0 || j >= (long)v.size() || v[j] < 0) continue;
+            if (net.edge_of(l, v[j], n) >= 0) return v[j];
+        }
+        return -1;
     }
     double run_time(int l, int a, int b, double fallback) const {
         auto it = run_l.find({l, {a, b}});
@@ -86,6 +115,7 @@ struct OdptTrain {
     std::string id, number, dest;   // dest は駅名（地図に無い駅なら ODPT の ID の最後の部分）
     int line = -1, from = -1, to = -1;   // to = -1 は from の駅にいる
     double delay = 0;               // 秒
+    int asc = -1;                   // 1 = 駅の番号が増える向き、0 = 減る向き、-1 = わからない
 };
 
 // JSON を読んで、地図に載る列車だけを返す（路線か駅が地図に無いもの＝直通先を走っている列車は外す）
@@ -117,6 +147,10 @@ inline std::vector<OdptTrain> parse_odpt_trains(const std::string& json_text, co
             std::string id = (*d)[0].get<std::string>();
             auto nm = tab.station_name.find(id);
             t.dest = nm != tab.station_name.end() ? nm->second : id.substr(id.rfind('.') + 1);
+        }
+        if (auto od = tab.order.find(t.line); od != tab.order.end()) {
+            std::string dir = str(o, "odpt:railDirection");
+            if (!dir.empty()) t.asc = dir == od->second.asc ? 1 : 0;
         }
         if (t.id.empty()) continue;
         out.push_back(t);

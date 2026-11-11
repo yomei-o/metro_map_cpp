@@ -34,6 +34,7 @@ struct Train {
     std::string id, number, dest;
     double delay = 0;
     int from = -1, to = -1;      // to = -1 は from の駅にいる。それ以外は from → to を走っている
+    int asc = -1;                // 走る向き（OdptTrain::asc）。止まっているときの尾の向きに使う
     double p0 = 0, t0 = 0, rate = 0;   // 走っている割合 p = p0 + (wall - t0) * rate
     bool confirmed = false;      // to に着いたことがわかっている（なら最後まで進めてよい。わからなければ手前で待つ）
 };
@@ -312,7 +313,10 @@ struct Map {
     void place_at(Train& t, int n) {
         int e = -1;
         auto touches = [&](int f) { return f >= 0 && f < (int)net.edges.size() && net.edges[f].line == t.line && (net.edges[f].a == n || net.edges[f].b == n); };
-        if (touches(t.edge)) e = t.edge;
+        // 尾が来た向きに伸びるよう、「1 つ後ろの駅」からの辺に置く（わからなければ、いまの辺＝着いた区間）
+        int b = odpt.behind(net, t.line, n, t.asc);
+        if (b >= 0) e = net.edge_of(t.line, b, n);
+        if (e < 0 && touches(t.edge)) e = t.edge;
         if (e < 0) for (int f : net.lines[t.line].edges) if (touches(f)) { e = f; break; }
         if (e < 0) return;
         t.edge = e; t.dir = net.edges[e].b == n ? 1 : -1; t.t = t.dir > 0 ? 1 : 0;
@@ -323,7 +327,12 @@ struct Map {
         int e = net.edge_of(t.line, a, b);
         if (e < 0) return false;
         if (t.edge >= 0 && t.edge != e && (net.edges[t.edge].a == a || net.edges[t.edge].b == a)) { t.prev_edge = t.edge; t.prev_dir = net.edges[t.edge].b == a ? 1 : -1; }
-        else t.prev_edge = -1;
+        else {
+            int b = odpt.behind(net, t.line, a, t.asc);   // 初めて見た列車も、後ろの駅がわかれば尾をそこまで伸ばせる
+            int pe = b >= 0 ? net.edge_of(t.line, b, a) : -1;
+            t.prev_edge = pe;
+            if (pe >= 0) t.prev_dir = net.edges[pe].b == a ? 1 : -1;
+        }
         t.edge = e; t.dir = net.edges[e].a == a ? 1 : -1;
         t.from = a; t.to = b; t.p0 = p0; t.t0 = wall; t.rate = rate; t.confirmed = confirmed; t.dwell = 0;
         t.t = t.dir > 0 ? p0 : 1 - p0;
@@ -347,7 +356,7 @@ struct Map {
             Train t;
             if (known) t = it->second;
             else { t.live = true; t.id = o.id; t.line = o.line; t.edge = -1; }
-            t.number = o.number; t.dest = o.dest; t.delay = o.delay;
+            t.number = o.number; t.dest = o.dest; t.delay = o.delay; t.asc = o.asc;
             if (o.to >= 0) {
                 if (!(known && t.from == o.from && t.to == o.to)) {
                     double r = odpt.run_time(o.line, o.from, o.to, 90);
@@ -446,8 +455,9 @@ struct Map {
             if (p.x < -60 || p.y < -60 || p.x > W + 60 || p.y > H + 60) continue;
             Rgb c = hex(net.lines[t.line].color);
             // 流れ星の尾：後ろへ行くほど細く・暗く
-            if (t.dwell <= 0) {
-                auto tail = tail_points(t, lw * 18.f, 20);
+            // 止まっているあいだも、来た向きがわかるように尾を出す（少し短く）
+            {
+                auto tail = tail_points(t, lw * (t.dwell > 0 ? 12.f : 18.f), 20);
                 for (size_t k = tail.size(); k-- > 1;) {
                     float f = 1.f - (float)k / tail.size();
                     polyline(frame, {tail[k], tail[k - 1]}, lw * (0.3f + 1.7f * f), mix(c, {1, 1, 1}, 0.45f * f), 0.9f * f * f, true);
