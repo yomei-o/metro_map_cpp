@@ -32,6 +32,7 @@ ODPT が教えてくれるのは「どの駅にいるか（`toStation` が null�
 | ファイル | やること |
 |---|---|
 | `tools/build_network.py` | 国土数値情報（鉄道データ N02-24）から、地下鉄 13 路線の線路と駅を `data/network.txt` に取り出す |
+| `tools/build_admin.py` | 国土数値情報（行政区域データ N03）から、東京都の外周（市区町村を dissolve した本土の外周）と 23 区の区界を `data/admin_tokyo.txt` に取り出す |
 | `network.hpp` | 経緯度をメルカトル図法に投影し、同じ名前の近い駅を 1 つの乗換駅にまとめる。路線の線路全体を 20 m おきの点の網にして、各駅から網に沿って隣の駅を探し、駅と駅のあいだ（区間）とその線路の形を作る |
 | `layout.hpp` | 路線図の配置を計算する。実際の位置に魚眼をかけて都心を広げた位置を出発点に、「区間の向きを 0°/45°/90° に寄せる」「駅の間隔をそろえる」「途中駅でまっすぐ通す」「無関係な駅を離す」を少しずつ同時にかける（乱数なし、毎回同じ結果） |
 | `raster.hpp` | なめらかな太線（継ぎ目が濃くならない）、円、光（縮めてぼかして足す）、stb_truetype の日本語（暗い縁取りつき） |
@@ -73,6 +74,7 @@ python tools/build_odpt_toei.py <dir> > data/odpt_toei.txt
 
 - コード: BSD-3-Clause（`LICENSE`）
 - 線路と駅: 「国土数値情報（鉄道データ）」（国土交通省）N02-24 を加工して作成（CC BY 4.0）。`data/network.txt`、`docs/network.txt`
+- 東京都の外周と 23 区の区界（実際の地図のときだけ薄く描く目印）: 「国土数値情報（行政区域データ）」（国土交通省）N03（2025-01-01、東京都）を加工して作成（CC BY 4.0）。`data/admin_tokyo.txt`、`docs/admin_tokyo.txt`
 - 列車の位置・時刻表（都営）: 公共交通オープンデータセンター（ODPT）を通じて東京都交通局が提供するデータを使用。`data/odpt_toei.txt` はそれを加工したもの。内容の正確さ・完全さは保証されません
 - 文字: Noto Sans JP（SIL Open Font License 1.1、`fonts/OFL.txt`）。駅名に使う 350 文字に絞り、太さ 700 に固定したもの
 - stb_truetype / stb_image_write: パブリックドメイン（または MIT）

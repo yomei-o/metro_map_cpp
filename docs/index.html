@@ -45,7 +45,7 @@ button.on { background: var(--accent); color: #04121f; border-color: var(--accen
 光る頭と尾が列車で、尾の反対側へ進んでいます。ドラッグで移動、ホイール・2 本指で拡大縮小、駅や列車をタップで名前・行き先。<br>
 列車の位置（都営）：公共交通オープンデータセンター（ODPT）を通じて東京都交通局が提供するデータを使用。内容の正確さ・完全さは保証されません／
 
-線路と駅：「国土数値情報（鉄道データ）」（国土交通省）を加工して作成（CC BY 4.0）／ 文字：Noto Sans JP（SIL OFL 1.1）</div>
+線路と駅：「国土数値情報（鉄道データ N02）」、東京都の外周と 23 区の区界：「国土数値情報（行政区域データ N03）」（いずれも国土交通省）を加工して作成（CC BY 4.0）／ 文字：Noto Sans JP（SIL OFL 1.1）</div>
 
 <script src="mm.js"></script>
 <script>
@@ -197,6 +197,12 @@ addEventListener('resize', () => { if (M) { size(); M._mm_fit(); } });
   const stations = M._mm_init(tp, fp, fb.length);
   M._free(tp);   // フォントは C++ 側がコピーして持つ
   M._free(fp);
+  // 東京都の外周と 23 区の区界（実際の地図のときだけ薄く）。国土数値情報 N03
+  try {
+    const admin = await fetch('admin_tokyo.txt').then(r => r.text());
+    const an = M.lengthBytesUTF8(admin) + 1, ap = M._malloc(an); M.stringToUTF8(admin, ap, an);
+    M._mm_admin(ap); M._free(ap);
+  } catch (e) {}
   const lines = JSON.parse(M.UTF8ToString(M._mm_lines()));
   lines.forEach(l => lineInfo[l.code] = l);
   document.getElementById('legend').innerHTML = lines.map(l => `<div><span class="pill" style="background:#${l.color}">${l.code}</span>${l.name}</div>`).join('');

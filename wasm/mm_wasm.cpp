@@ -23,6 +23,8 @@ EMSCRIPTEN_KEEPALIVE void mm_ui(double u) { g.ui = u; g.dirty = true; }
 EMSCRIPTEN_KEEPALIVE void mm_tick(double dt, double wall) { g.wall = wall; g.tick(dt); }
 // ODPT: 駅と所要時間の表（data/odpt_toei.txt）を読む。戻り値は地図に結びつかなかった行の数
 EMSCRIPTEN_KEEPALIVE int mm_odpt_table(const char* text) { return g.load_odpt(text); }
+// 東京都の外周と 23 区の区界（data/admin_tokyo.txt）。戻り値は読み込んだ輪の数。実際の地図のときだけ薄く描く
+EMSCRIPTEN_KEEPALIVE int mm_admin(const char* text) { return g.load_admin(text); }
 // ODPT: odpt:Train の JSON を反映する。戻り値は地図に載った列車の数
 EMSCRIPTEN_KEEPALIVE int mm_odpt(const char* json, double wall) { g.wall = wall; return g.apply_odpt(json); }
 EMSCRIPTEN_KEEPALIVE const uint8_t* mm_render() { return g.render(); }

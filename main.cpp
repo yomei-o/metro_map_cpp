@@ -29,6 +29,7 @@ int main(int argc, char** argv) {
     mm::Map m;
     auto t0 = std::chrono::steady_clock::now();
     if (!m.load(text, (const unsigned char*)font.data(), font.size())) { fprintf(stderr, "load: %s\n", m.net.error.c_str()); return 1; }
+    { std::string a = read_all("data/admin_tokyo.txt"); if (!a.empty()) printf("admin rings %d\n", m.load_admin(a)); }   // 東京都の外周と 23 区
     auto t1 = std::chrono::steady_clock::now();
     printf("lines %zu, stations %zu, edges %zu, trains %zu (load + layout %.0f ms)\n", m.net.lines.size(), m.net.nodes.size(), m.net.edges.size(),
            m.trains.size(), std::chrono::duration<double, std::milli>(t1 - t0).count());

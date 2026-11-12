@@ -1,7 +1,8 @@
 BSD 3-Clause License
 
-This license applies to this repository's own source code. The railway data (data/, docs/network.txt) is
-CC BY 4.0 (MLIT National Land Numerical Information, N02-24) and the font (fonts/, docs/font.ttf) is
+This license applies to this repository's own source code. The railway data (data/, docs/network.txt) and
+the Tokyo prefecture / 23-ward boundaries (data/admin_tokyo.txt, docs/admin_tokyo.txt) are CC BY 4.0
+(MLIT National Land Numerical Information, N02-24 and N03) and the font (fonts/, docs/font.ttf) is
 SIL OFL 1.1 (Noto Sans JP). See README.md.
 
 

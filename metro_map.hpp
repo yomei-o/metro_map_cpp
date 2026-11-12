@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -65,6 +66,8 @@ struct Map {
     // 路線図風の位置は、実際の地図と同じくらいの大きさに合わせた km 座標で持つ（変形の途中も同じ View で描ける）
     std::vector<P2> sch_km;
     std::vector<std::vector<P2>> edge_sch_km;
+    // 東京都の外周（pref）と 23 区の区界（ward）。実際の地図のときだけ薄く描く。km 座標（mercator）
+    std::vector<std::vector<P2>> admin_pref, admin_ward;
 
     bool load(const std::string& text, const unsigned char* font_bytes, size_t font_n) {
         if (!parse_network(text, net)) return false;
@@ -183,6 +186,15 @@ struct Map {
             P2 lo = to_world(0, 0), hi = to_world(W, H);
             for (double gx = std::floor(lo.x); gx <= hi.x; gx += 1) { V2 a = to_screen({gx, lo.y}), b = to_screen({gx, hi.y}); polyline(base, {a, b}, 1, {0.2f, 0.25f, 0.35f}, 0.12f * (float)(1 - ez)); }
             for (double gy = std::floor(lo.y); gy <= hi.y; gy += 1) { V2 a = to_screen({lo.x, gy}), b = to_screen({hi.x, gy}); polyline(base, {a, b}, 1, {0.2f, 0.25f, 0.35f}, 0.12f * (float)(1 - ez)); }
+        }
+        // 東京都の外周と 23 区の区界（実際の地図のときだけ、うっすら。路線図へ変形するほど消える）
+        if (ez < 1 && (!admin_pref.empty() || !admin_ward.empty())) {
+            float a = (float)(1 - ez);
+            auto draw_rings = [&](const std::vector<std::vector<P2>>& rs, float w, Rgb col, float al) {
+                for (auto& r : rs) { std::vector<V2> s; s.reserve(r.size()); for (auto& p : r) s.push_back(to_screen(p)); polyline(base, s, w, col, al * a); }
+            };
+            draw_rings(admin_ward, std::max(1.f, (float)ui), {0.26f, 0.31f, 0.44f}, 0.22f);
+            draw_rings(admin_pref, std::max(1.f, 1.3f * (float)ui), {0.36f, 0.42f, 0.56f}, 0.33f);
         }
         std::fill(glow.px.begin(), glow.px.end(), 0.f);
         const float lw = line_width();
@@ -306,6 +318,24 @@ struct Map {
     //   - 着いたと言われた: 残りを数秒で進めて駅に止める
     //   - 前の駅から次の駅へ、あいだを見ないまま移っていた: 遅れを取り戻すよう早めに走らせる
     int load_odpt(const std::string& table_text) { return odpt.load(table_text, net); }
+
+    // 東京都の外周と 23 区の区界を読む（data/admin_tokyo.txt、lon,lat）。km（mercator）に直して持つ
+    int load_admin(const std::string& text) {
+        admin_pref.clear(); admin_ward.clear();
+        std::istringstream in(text); std::string ln; int which = -1;   // 0=pref 1=ward
+        while (std::getline(in, ln)) {
+            if (ln.empty() || ln[0] == '#') continue;
+            if (ln.rfind("pref", 0) == 0) { which = 0; continue; }
+            if (ln.rfind("ward", 0) == 0) { which = 1; continue; }
+            if (ln.rfind("ring ", 0) == 0 && which >= 0) {
+                std::vector<P2> r; std::istringstream ls(ln.substr(5)); std::string tok;
+                while (ls >> tok) { size_t c = tok.find(','); if (c == std::string::npos) continue; r.push_back(mercator(std::stod(tok.substr(0, c)), std::stod(tok.substr(c + 1)))); }
+                if (r.size() >= 2) (which == 0 ? admin_pref : admin_ward).push_back(std::move(r));
+            }
+        }
+        dirty = true;
+        return (int)(admin_pref.size() + admin_ward.size());
+    }
 
     double live_p(const Train& t) const { return std::clamp(t.p0 + (wall - t.t0) * t.rate, 0.0, t.confirmed ? 1.0 : 0.97); }
 
