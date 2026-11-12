@@ -12,8 +12,10 @@
 **都営 4 路線（浅草・三田・新宿・大江戸）の列車は、いま実際に走っている列車です。** 公共交通オープンデータセンター（ODPT）の列車ロケーション情報（`odpt:Train`）を、ブラウザから約 30 秒ごとに取っています。
 都営のデータはキー無しの公開用 API（`https://api-public.odpt.org/api/v4/`、`Access-Control-Allow-Origin: *`）で取れるので、公開ページにキーを置かずに済みます。
 
-> **東京メトロ 9 路線の列車は、まだ仮のものです。** メトロのデータはキーの要る API にしか無く（公開用 API では `[]` が返る）、開発者登録の承認待ちです。
-> それまでは、それらしく走る仮の列車（区間を約 40 km/h で走り、駅で 25 秒止まる）を使っています。
+**東京メトロ 9 路線の列車は、時刻表（ダイヤ）どおりの位置です。** 東京メトロは列車の位置（`odpt:Train`）を公開していません（ODPT で位置を出しているのは都営と横浜市営だけ）。
+そこでキーの要る時刻表（`odpt:TrainTimetable`）をビルド時に取って `data/odpt_metro.txt` に焼き、ブラウザは「いまこの時刻にどの列車がどの駅間にいるはず」をダイヤから計算して走らせます。
+ページにキーは埋めず、メトロは通信ゼロです（時刻表は焼き込み済み）。「実際の位置」ではなく「ダイヤ上の位置」なので、遅延は反映しません。発車時刻の瞬間は正しい駅にいて、駅間は補間です。
+なお ODPT のメトロ時刻表は各駅の発車時刻だけで到着時刻が無いため、通過待ち（待避）の「待っている時間」は再現できません。
 
 ### 都営の列車の動かし方
 
@@ -37,6 +39,7 @@ ODPT が教えてくれるのは「どの駅にいるか（`toStation` が null�
 | `layout.hpp` | 路線図の配置を計算する。実際の位置に魚眼をかけて都心を広げた位置を出発点に、「区間の向きを 0°/45°/90° に寄せる」「駅の間隔をそろえる」「途中駅でまっすぐ通す」「無関係な駅を離す」を少しずつ同時にかける（乱数なし、毎回同じ結果） |
 | `raster.hpp` | なめらかな太線（継ぎ目が濃くならない）、円、光（縮めてぼかして足す）、stb_truetype の日本語（暗い縁取りつき） |
 | `tools/build_odpt_toei.py` | ODPT の都営の路線・時刻表から、駅の対応と区間の所要時間を `data/odpt_toei.txt` に取り出す |
+| `tools/build_odpt_metro.py` | ODPT の東京メトロの時刻表（キー要）を、列車ごとの「駅と発車時刻」の表 `data/odpt_metro.txt` に焼く。`metro_map.hpp` が今の時刻の位置を計算して走らせる |
 | `odpt.hpp` | `data/odpt_toei.txt` を読み、`odpt:Train` の JSON（nlohmann/json）を地図の駅・路線に結びつける |
 | `metro_map.hpp` | 2 種類の地図の描画と変形、駅名の配置（乗換駅が先、重ならない場所へ）、列車と流れ星の尾、ODPT の列車の動かし方 |
 | `wasm/` | ブラウザ用の入口とビルド |
@@ -67,8 +70,10 @@ python tools/build_network.py data/raw/n02/UTF-8/N02-24_RailroadSection.geojson 
 python tools/subset_font.py NotoSansJP[wght].ttf data/network.txt fonts/NotoSansJP-Bold-subset.ttf
 # ODPT（キー無し）から rw.json と tt_{Asakusa,Mita,Shinjuku,Oedo}.json を <dir> に取ってから（取り方はスクリプトの先頭）
 python tools/build_odpt_toei.py <dir> > data/odpt_toei.txt
+# 東京メトロのダイヤ（キーが要る。キーはページには出ない）
+python tools/build_odpt_metro.py <ODPTのアクセストークン> > data/odpt_metro.txt
 ```
-時刻表が改正されたら `data/odpt_toei.txt` を作り直すと、区間の所要時間が新しくなります（いまのものは 2026-11-11 に取った時刻表から）。
+時刻表が改正されたら `data/odpt_toei.txt`・`data/odpt_metro.txt` を作り直します（メトロは平日・土休の両ダイヤを焼いてあり、ページ側で今日がどちらかを選ぶ。いまのものは 2026-11-12 に取った時刻表から）。
 
 ## 出典とライセンス
 
@@ -76,6 +81,7 @@ python tools/build_odpt_toei.py <dir> > data/odpt_toei.txt
 - 線路と駅: 「国土数値情報（鉄道データ）」（国土交通省）N02-24 を加工して作成（CC BY 4.0）。`data/network.txt`、`docs/network.txt`
 - 東京都の外周と 23 区の区界（実際の地図のときだけ薄く描く目印）: 「国土数値情報（行政区域データ）」（国土交通省）N03（2025-01-01、東京都）を加工して作成（CC BY 4.0）。`data/admin_tokyo.txt`、`docs/admin_tokyo.txt`
 - 列車の位置・時刻表（都営）: 公共交通オープンデータセンター（ODPT）を通じて東京都交通局が提供するデータを使用。`data/odpt_toei.txt` はそれを加工したもの。内容の正確さ・完全さは保証されません
+- 時刻表（東京メトロ）: 公共交通オープンデータセンター（ODPT）を通じて東京地下鉄が提供するデータを使用。`data/odpt_metro.txt` はそれを加工したもの（ダイヤ上の位置の計算に使用。遅延は反映しません）。内容の正確さ・完全さは保証されません
 - 文字: Noto Sans JP（SIL Open Font License 1.1、`fonts/OFL.txt`）。駅名に使う 350 文字に絞り、太さ 700 に固定したもの
 - stb_truetype / stb_image_write: パブリックドメイン（または MIT）
 - nlohmann/json 3.12.0（`third_party/nlohmann/json.hpp`）: MIT。ODPT の列車ロケーション（JSON）を C++ 側で読むために入れてある

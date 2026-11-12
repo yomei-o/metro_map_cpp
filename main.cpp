@@ -30,12 +30,14 @@ int main(int argc, char** argv) {
     auto t0 = std::chrono::steady_clock::now();
     if (!m.load(text, (const unsigned char*)font.data(), font.size())) { fprintf(stderr, "load: %s\n", m.net.error.c_str()); return 1; }
     { std::string a = read_all("data/admin_tokyo.txt"); if (!a.empty()) printf("admin rings %d\n", m.load_admin(a)); }   // 東京都の外周と 23 区
+    { std::string mt = read_all("data/odpt_metro.txt"); if (!mt.empty()) printf("metro trips %d\n", m.load_metro(mt)); }  // メトロのダイヤ
     auto t1 = std::chrono::steady_clock::now();
     printf("lines %zu, stations %zu, edges %zu, trains %zu (load + layout %.0f ms)\n", m.net.lines.size(), m.net.nodes.size(), m.net.edges.size(),
            m.trains.size(), std::chrono::duration<double, std::milli>(t1 - t0).count());
     for (auto& L : m.net.lines) printf("  %c %s: %zu stations, %zu edges\n", L.code, L.name.c_str(), L.nodes.size(), L.edges.size());
     m.resize(W, H);
     m.fit();
+    m.wall = 1.7e9; m.metro_cal = 0;   // ネイティブ確認用：ある平日の朝（JST 7 時ごろ）の時刻でダイヤを反映
     for (int k = 0; k < 60; ++k) m.tick(0.5);   // 列車を少し走らせて、尾が出るように
     if (argc > 6) {
         int bad = m.load_odpt(read_all(argv[6]));

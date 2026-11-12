@@ -25,6 +25,10 @@ EMSCRIPTEN_KEEPALIVE void mm_tick(double dt, double wall) { g.wall = wall; g.tic
 EMSCRIPTEN_KEEPALIVE int mm_odpt_table(const char* text) { return g.load_odpt(text); }
 // 東京都の外周と 23 区の区界（data/admin_tokyo.txt）。戻り値は読み込んだ輪の数。実際の地図のときだけ薄く描く
 EMSCRIPTEN_KEEPALIVE int mm_admin(const char* text) { return g.load_admin(text); }
+// 東京メトロのダイヤ（data/odpt_metro.txt）。戻り値は列車（trip）の数。位置は時刻表どおりに計算して走らせる
+EMSCRIPTEN_KEEPALIVE int mm_metro_table(const char* text) { return g.load_metro(text); }
+// きょうが平日なら 0、土日・祝日なら 1（ページが判定して渡す）
+EMSCRIPTEN_KEEPALIVE void mm_calendar(int cal) { g.metro_cal = cal ? 1 : 0; g.last_metro = -1; }
 // ODPT: odpt:Train の JSON を反映する。戻り値は地図に載った列車の数
 EMSCRIPTEN_KEEPALIVE int mm_odpt(const char* json, double wall) { g.wall = wall; return g.apply_odpt(json); }
 EMSCRIPTEN_KEEPALIVE const uint8_t* mm_render() { return g.render(); }
@@ -46,7 +50,7 @@ EMSCRIPTEN_KEEPALIVE const char* mm_pick(double x, double y) {
     int ti = g.pick_train(x, y, 10 * g.ui);
     if (ti >= 0) {
         auto& t = g.trains[ti];
-        char b[64]; snprintf(b, sizeof b, ",\"delay\":%d,\"live\":%d}", (int)t.delay, t.live ? 1 : 0);
+        char b[80]; snprintf(b, sizeof b, ",\"delay\":%d,\"live\":%d,\"sched\":%d}", (int)t.delay, (t.live && !t.sched) ? 1 : 0, t.sched ? 1 : 0);
         return (g_json = "{\"train\":\"" + esc(t.number) + "\",\"line\":\"" + std::string(1, g.net.lines[t.line].code) + "\",\"dest\":\"" + esc(t.dest) + "\"" + b).c_str();
     }
     int n = g.pick(x, y);

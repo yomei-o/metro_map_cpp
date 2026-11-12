@@ -41,7 +41,7 @@ button.on { background: var(--accent); color: #04121f; border-color: var(--accen
 </div>
 <div class="panel" id="legend"></div>
 <div class="panel" id="tip"></div>
-<div class="panel" id="note"><b>都営 4 路線</b>（浅草・三田・新宿・大江戸）の列車は、いま実際に走っている列車の位置（ODPT、約 30 秒ごとに更新）。駅と駅のあいだは時刻表の所要時間で進めています。<b>メトロ 9 路線</b>の列車は、まだ仮のものです（ODPT の承認待ち）。
+<div class="panel" id="note"><b>都営 4 路線</b>（浅草・三田・新宿・大江戸）の列車は、いま実際に走っている列車の位置（ODPT、約 30 秒ごとに更新）。<b>メトロ 9 路線</b>は列車位置が公開されていないので、時刻表（ODPT）どおりの位置で走らせています（ダイヤ上の位置。遅延は反映しません）。いずれも駅と駅のあいだは補間しています。
 光る頭と尾が列車で、尾の反対側へ進んでいます。ドラッグで移動、ホイール・2 本指で拡大縮小、駅や列車をタップで名前・行き先。<br>
 列車の位置（都営）：公共交通オープンデータセンター（ODPT）を通じて東京都交通局が提供するデータを使用。内容の正確さ・完全さは保証されません／
 
@@ -102,9 +102,10 @@ function showTip(x, y) {
   const j = JSON.parse(M.UTF8ToString(M._mm_pick(x * s, y * s)));
   if (j.train !== undefined) {
     const L = lineInfo[j.line];
-    const delay = !j.live ? '仮の列車' : j.delay >= 60 ? `${Math.round(j.delay / 60)} 分遅れ` : '遅れなし';
+    const named = j.live || j.sched;   // 行き先・列車番号を出せる（都営の実列車 or メトロのダイヤ）
+    const delay = j.sched ? 'ダイヤ上の位置' : !j.live ? '仮の列車' : j.delay >= 60 ? `${Math.round(j.delay / 60)} 分遅れ` : '遅れなし';
     tip.innerHTML = `<span class="pill" style="background:#${L.color}">${j.line}</span> <b>${L.name}</b>` +
-      (j.live ? `<br>${j.dest ? j.dest + ' 行き・' : ''}${j.train}<br>${delay}` : `<br>${delay}`);
+      (named ? `<br>${j.dest ? j.dest + ' 行き・' : ''}${j.train}<br>${delay}` : `<br>${delay}`);
     tip.style.left = Math.min(x + 14, innerWidth - 220) + 'px'; tip.style.top = (y + 14) + 'px'; tip.style.display = 'block';
   } else if (j.name) {
     tip.innerHTML = `<b>${j.name}</b><br>` + j.lines.map(c => `<span class="pill" style="background:#${lineInfo[c].color}">${c}</span> ${lineInfo[c].name}`).join('<br>');
@@ -188,6 +189,18 @@ mSch.onclick = () => { M._mm_mode(1); mSch.classList.add('on'); mGeo.classList.r
 document.getElementById('fit').onclick = () => M._mm_fit();
 addEventListener('resize', () => { if (M) { size(); M._mm_fit(); } });
 
+// きょうは土休ダイヤか（土日 or 祝日）。メトロの時刻表（平日／土休）の選択に使う
+const JP_HOLIDAYS = new Set([
+  '2026-1-1','2026-1-12','2026-2-11','2026-2-23','2026-3-20','2026-4-29','2026-5-3','2026-5-4','2026-5-5','2026-5-6',
+  '2026-7-20','2026-8-11','2026-9-21','2026-9-22','2026-9-23','2026-10-12','2026-11-3','2026-11-23',
+  '2027-1-1','2027-1-11','2027-2-11','2027-2-23','2027-3-21','2027-3-22','2027-4-29','2027-5-3','2027-5-4','2027-5-5',
+  '2027-7-19','2027-8-11','2027-9-20','2027-9-23','2027-10-11','2027-11-3','2027-11-23',
+]);
+function isHoliday(d) {
+  const w = d.getDay();
+  if (w === 0 || w === 6) return true;
+  return JP_HOLIDAYS.has(`${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`);
+}
 (async () => {
   const [net, font, mod] = await Promise.all([
     fetch('network.txt').then(r => r.text()), fetch('font.ttf').then(r => r.arrayBuffer()), createMM()]);
@@ -215,6 +228,14 @@ addEventListener('resize', () => { if (M) { size(); M._mm_fit(); } });
   const tn = M.lengthBytesUTF8(table) + 1, tt = M._malloc(tn); M.stringToUTF8(table, tt, tn);
   M._mm_odpt_table(tt); M._free(tt);
   pollTrains();
+  // メトロ 9 路線：列車位置は非公開なので、ビルド時に焼いた時刻表（キー不要）どおりに走らせる
+  try {
+    M._mm_calendar(isHoliday(new Date()) ? 1 : 0);
+    const metro = await fetch('odpt_metro.txt').then(r => r.text());
+    const mn = M.lengthBytesUTF8(metro) + 1, mp = M._malloc(mn); M.stringToUTF8(metro, mp, mn);
+    const trips = M._mm_metro_table(mp); M._free(mp);
+    console.log('metro trips', trips);
+  } catch (e) { console.warn('metro load failed', e); }
 })().catch(err => statusEl.textContent = '読み込みに失敗: ' + err);
 </script>
 </body>

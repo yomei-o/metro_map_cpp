@@ -29,6 +29,7 @@ struct Train {
     int dir = 1;         // +1 = a → b、-1 = b → a
     double dwell = 0;    // 駅での停車の残り（秒）
     bool live = false;   // ODPT から来た列車か（仮の列車なら false）
+    bool sched = false;  // メトロのダイヤ（時刻表）で動かす列車か
     std::string label;   // 行き先など（表示用）
     int prev_edge = -1, prev_dir = 1;   // 1 つ前の区間（尾をそこまで伸ばすため）
     // ODPT の列車だけが使う
@@ -68,6 +69,15 @@ struct Map {
     std::vector<std::vector<P2>> edge_sch_km;
     // 東京都の外周（pref）と 23 区の区界（ward）。実際の地図のときだけ薄く描く。km 座標（mercator）
     std::vector<std::vector<P2>> admin_pref, admin_ward;
+    // 東京メトロのダイヤ（時刻表）。メトロは列車位置を公開していないので、時刻表どおりの位置で走らせる
+    struct MRail { int line = -1; std::vector<int> nodes; };                 // network のノード番号を駅の並び順で
+    struct MTrip { int rail = 0, cal = 0, asc = -1; std::string dest, num; std::vector<std::pair<int,int>> stops; };  // stops: (order 番号, 真夜中からの秒)
+    std::vector<MRail> mrails;
+    std::vector<MTrip> mtrips;
+    std::vector<char> sched_line;     // ダイヤで動かす路線（そこは仮の列車を出さない）
+    int metro_cal = 0;                // 0=平日 1=土休（ページが渡す）
+    int metro_count = 0;
+    double last_metro = -1;
 
     bool load(const std::string& text, const unsigned char* font_bytes, size_t font_n) {
         if (!parse_network(text, net)) return false;
@@ -289,6 +299,8 @@ struct Map {
     }
     void tick(double dt) {
         clock += dt;
+        // メトロのダイヤ：約 1.5 秒ごとに「いまの時刻の列車」を置き直す（あいだは下の補間でなめらかに動く）
+        if (!mtrips.empty() && (last_metro < 0 || wall - last_metro >= 1.5 || wall < last_metro)) { last_metro = wall; apply_metro(); }
         if (mode != target) {
             double step = dt / 1.2;
             mode = mode < target ? std::min(target, mode + step) : std::max(target, mode - step);
@@ -337,6 +349,115 @@ struct Map {
         return (int)(admin_pref.size() + admin_ward.size());
     }
 
+    // 東京メトロのダイヤ（data/odpt_metro.txt）を読む。戻り値は読み込んだ列車（trip）の数
+    int load_metro(const std::string& text) {
+        mrails.clear(); mtrips.clear();
+        std::map<std::string, int> sid_node;    // ODPT の駅 → network のノード
+        std::map<std::string, int> rail_of;     // ODPT の路線 → mrails の番号
+        std::vector<std::string> order_lines, trip_lines;
+        std::istringstream in(text); std::string ln;
+        while (std::getline(in, ln)) {
+            if (!ln.empty() && ln.back() == '\r') ln.pop_back();
+            if (ln.empty() || ln[0] == '#') continue;
+            std::istringstream s(ln); std::string kind; s >> kind;
+            if (kind == "railway") {
+                std::string id, code; s >> id >> code;
+                int l = code.empty() ? -1 : net.line_of(code[0]);
+                rail_of[id] = (int)mrails.size();
+                MRail r; r.line = l; mrails.push_back(r);
+            } else if (kind == "station") {
+                std::string id, code, name; s >> id >> code; std::getline(s >> std::ws, name);
+                int l = code.empty() ? -1 : net.line_of(code[0]), n = -1;
+                for (size_t i = 0; i < net.nodes.size() && l >= 0; ++i)
+                    if (net.nodes[i].name == name && std::find(net.nodes[i].lines.begin(), net.nodes[i].lines.end(), l) != net.nodes[i].lines.end()) { n = (int)i; break; }
+                sid_node[id] = n;
+            } else if (kind == "order") {
+                order_lines.push_back(ln);
+            } else if (kind == "trip") {
+                trip_lines.push_back(ln);
+            }
+        }
+        for (auto& ol : order_lines) {
+            std::istringstream s(ol); std::string kind, rid, asc, st; s >> kind >> rid >> asc;
+            auto it = rail_of.find(rid);
+            if (it == rail_of.end()) continue;
+            auto& nodes = mrails[it->second].nodes; nodes.clear();
+            while (s >> st) { auto f = sid_node.find(st); nodes.push_back(f == sid_node.end() ? -1 : f->second); }
+        }
+        sched_line.assign(net.lines.size(), 0);
+        for (auto& tl : trip_lines) {
+            std::istringstream s(tl); std::string kind, tok; s >> kind;
+            MTrip t; s >> t.rail >> t.cal >> t.asc >> t.dest >> t.num;
+            while (s >> tok) { size_t c = tok.find(':'); if (c == std::string::npos) continue; t.stops.push_back({std::stoi(tok.substr(0, c)), std::stoi(tok.substr(c + 1))}); }
+            if (t.rail < 0 || t.rail >= (int)mrails.size() || t.stops.size() < 2) continue;
+            if (mrails[t.rail].line >= 0 && mrails[t.rail].line < (int)sched_line.size()) sched_line[mrails[t.rail].line] = 1;
+            mtrips.push_back(std::move(t));
+        }
+        last_metro = -1;   // 次の tick で反映
+        return (int)mtrips.size();
+    }
+
+    // ダイヤから「いまこの時刻の列車の位置」を作って、メトロの列車を置き直す（約 1.5 秒ごとに tick から呼ぶ）
+    void apply_metro() {
+        if (mtrips.empty()) return;
+        long tod = ((long)std::llround(wall) + 9 * 3600) % 86400; if (tod < 0) tod += 86400;
+        std::map<std::string, Train> old;
+        std::vector<Train> next;
+        for (auto& t : trains) {
+            if (t.sched) old[t.id] = t;
+            else if (t.live) next.push_back(t);
+            else if (t.line >= 0 && t.line < (int)sched_line.size() && sched_line[t.line]) continue;   // ダイヤ路線の仮列車は捨てる
+            else next.push_back(t);
+        }
+        for (auto& tr : mtrips) {
+            if (tr.cal != metro_cal) continue;
+            const auto& st = tr.stops;
+            long tt = -1;
+            for (long cand : {tod, tod + 86400}) if (cand >= st.front().second && cand <= st.back().second) { tt = cand; break; }
+            if (tt < 0) continue;
+            int i = 0; while (i + 1 < (int)st.size() && st[i + 1].second <= tt) ++i;
+            if (i + 1 >= (int)st.size()) continue;
+            int oiA = st[i].first, oiB = st[i + 1].first, secA = st[i].second, secB = st[i + 1].second;
+            if (secB <= secA) continue;
+            double fpos = oiA + (double)(oiB - oiA) * (tt - secA) / (double)(secB - secA);
+            int step = oiB > oiA ? 1 : -1;
+            const auto& nodes = mrails[tr.rail].nodes;
+            int cell = (int)std::floor(fpos);
+            if (cell < 0) cell = 0;
+            if (cell + 1 >= (int)nodes.size()) cell = (int)nodes.size() - 2;
+            if (cell < 0) continue;
+            int na = nodes[cell], nb = nodes[cell + 1];
+            if (na < 0 || nb < 0) continue;
+            int from_node, to_node; double prog;
+            if (step > 0) { from_node = na; to_node = nb; prog = fpos - cell; }
+            else { from_node = nb; to_node = na; prog = (cell + 1) - fpos; }
+            prog = std::clamp(prog, 0.0, 1.0);
+            int line = mrails[tr.rail].line;
+            int e = net.edge_of(line, from_node, to_node);
+            if (e < 0) continue;
+            std::string id = "M" + std::to_string(tr.rail) + ":" + tr.num;
+            Train t; auto it = old.find(id);
+            if (it != old.end()) t = it->second;
+            else { t.sched = true; t.live = true; t.id = id; t.line = line; }
+            t.number = tr.num; t.dest = tr.dest; t.asc = tr.asc; t.delay = 0;
+            t.edge = e; t.dir = net.edges[e].a == from_node ? 1 : -1;
+            t.from = from_node; t.to = to_node;
+            int pc = step > 0 ? cell - 1 : cell + 2;   // 進む向きの「1 つ後ろの駅」（尾を伸ばす先）
+            t.prev_edge = -1;
+            if (pc >= 0 && pc < (int)nodes.size() && nodes[pc] >= 0) {
+                int pe = net.edge_of(line, nodes[pc], from_node);
+                if (pe >= 0) { t.prev_edge = pe; t.prev_dir = net.edges[pe].a == nodes[pc] ? 1 : -1; }
+            }
+            double segSec = (secB - secA) / (double)std::max(1, std::abs(oiB - oiA));   // 1 駅ぶんの秒
+            t.rate = 1.0 / std::max(20.0, segSec);
+            t.p0 = prog; t.t0 = wall; t.confirmed = false;
+            t.t = t.dir > 0 ? prog : 1 - prog;
+            next.push_back(std::move(t));
+        }
+        trains.swap(next);
+        metro_count = 0; for (auto& t : trains) metro_count += t.sched;
+    }
+
     double live_p(const Train& t) const { return std::clamp(t.p0 + (wall - t.t0) * t.rate, 0.0, t.confirmed ? 1.0 : 0.97); }
 
     // 駅 n に止める。置く辺は、なるべくいまの辺（着いた区間）に
@@ -377,7 +498,8 @@ struct Map {
         std::map<std::string, Train> old;
         std::vector<Train> next;
         for (auto& t : trains) {
-            if (t.live) old[t.id] = t;
+            if (t.sched) next.push_back(t);            // メトロのダイヤ列車は保つ（apply_metro が管理する）
+            else if (t.live) old[t.id] = t;
             else if (!live_line[t.line]) next.push_back(t);
         }
         for (auto& o : obs) {
