@@ -6,11 +6,13 @@
 //   m.set_mode(1);            // 0 = 実際の地図風、1 = 路線図風（なめらかに変形する）
 //   m.tick(dt_seconds);       // 変形と列車を進める
 //   const uint8_t* rgba = m.render();
-//   m.set_here(lat, lon);     // 現在地（スマホの GPS など）。東京都（本土）の中のときだけ赤い丸で出す
+//   m.set_here(lat, lon);     // 現在地（スマホの GPS など）。東京都（本土）の中のときだけ赤く光る玉で出す
+//   m.hover(x, y); m.hit(x, y); m.click(x, y);   // 操作。パネル・ボタン・凡例・吹き出し・説明もすべてここで描く
 //
-// 地図（線・駅・駅名・光）は表示が変わったときだけ描き直してとっておき、毎フレームは列車だけを重ねる。
+// 地図（線・駅・駅名・光）とパネルは表示が変わったときだけ描き直してとっておき、毎フレームは列車だけを重ねる。
 #pragma once
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <sstream>
@@ -79,9 +81,19 @@ struct Map {
     int metro_cal = 0;                // 0=平日 1=土休（ページが渡す）
     int metro_count = 0;
     double last_metro = -1;
-    // 現在地（ページが navigator.geolocation から受け取って渡す）。都内（本土）のときだけ赤い丸で出す
+    // 現在地（ページが navigator.geolocation から受け取って渡す）。都内（本土）のときだけ赤く光る玉で出す
     bool here_on = false;
     P2 here;                          // km（mercator）
+    // 画面の部品（パネル・ボタン・凡例・吹き出し・説明）
+    struct Box { float x0, y0, x1, y1; int id; };
+    enum { BTN_GEO = 1, BTN_SCH = 2, BTN_FIT = 3, PANEL = 100 };
+    std::vector<Box> buttons, panels;     // panels はパネルの四角（列車の上に戻す・ドラッグを始めない）
+    Canvas info;                          // 地図（base）にパネルを重ねたもの
+    bool dirty_ui = true;
+    int odpt_state = 0;                   // 都営の列車：0 = まだ、1 = 取れた、2 = 取れなかった
+    double odpt_time = 0;                 // 最後に取れた時刻
+    double hover_x = -1, hover_y = -1;
+    bool auto_cal = true;                 // 平日／土休を wall（日本時間）から自分で決める
 
     bool load(const std::string& text, const unsigned char* font_bytes, size_t font_n) {
         if (!parse_network(text, net)) return false;
@@ -108,7 +120,7 @@ struct Map {
 
     void resize(int w, int h) {
         W = w; H = h;
-        base.resize(w, h); glow.resize(w, h); frame.resize(w, h);
+        base.resize(w, h); glow.resize(w, h); frame.resize(w, h); info.resize(w, h);
         rgba.assign((size_t)w * h * 4, 255);
         dirty = true;
     }
@@ -303,6 +315,10 @@ struct Map {
     }
     void tick(double dt) {
         clock += dt;
+        if (auto_cal) {   // きょうのダイヤ（平日／土休）。日付が変わったら置き直す
+            int cal = holiday_cal(wall);
+            if (cal != metro_cal) { metro_cal = cal; last_metro = -1; }
+        }
         // メトロのダイヤ：約 1.5 秒ごとに「いまの時刻の列車」を置き直す（あいだは下の補間でなめらかに動く）
         if (!mtrips.empty() && (last_metro < 0 || wall - last_metro >= 1.5 || wall < last_metro)) { last_metro = wall; apply_metro(); }
         if (mode != target) {
@@ -535,7 +551,8 @@ struct Map {
         }
         trains.swap(next);
         live_count = 0;
-        for (auto& t : trains) live_count += t.live;
+        for (auto& t : trains) live_count += t.live && !t.sched;
+        odpt_state = 1; odpt_time = wall; dirty_ui = true;
         return live_count;
     }
     // 画面上の点に近い列車（px）。無ければ -1
@@ -602,6 +619,185 @@ struct Map {
         return out;
     }
 
+    // ---- きょうのダイヤ（平日／土休） ----
+    // 日本時間の日付。ダイヤの 1 日は朝 3 時に切り替わるとみなす（真夜中すぎの列車は前の日のダイヤ）
+    static int holiday_cal(double wall) {
+        long long days = (long long)std::floor((wall + 9 * 3600 - 3 * 3600) / 86400);
+        int wd = (int)(((days + 4) % 7 + 7) % 7);   // 0 = 日曜（1970-01-01 は木曜）
+        if (wd == 0 || wd == 6) return 1;
+        // 日付（days から年月日）
+        long long z = days + 719468, era = (z >= 0 ? z : z - 146096) / 146097;
+        unsigned doe = (unsigned)(z - era * 146097), yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+        unsigned doy = doe - (365 * yoe + yoe / 4 - yoe / 100), mp = (5 * doy + 2) / 153;
+        int d = (int)(doy - (153 * mp + 2) / 5 + 1), m = (int)(mp < 10 ? mp + 3 : mp - 9);
+        int y = (int)(yoe + era * 400) + (m <= 2);
+        static const int HOL[] = {   // 祝日・振替休日（2026〜2027）
+            20260101, 20260112, 20260211, 20260223, 20260320, 20260429, 20260503, 20260504, 20260505, 20260506,
+            20260720, 20260811, 20260921, 20260922, 20260923, 20261012, 20261103, 20261123,
+            20270101, 20270111, 20270211, 20270223, 20270321, 20270322, 20270429, 20270503, 20270504, 20270505,
+            20270719, 20270811, 20270920, 20270923, 20271011, 20271103, 20271123};
+        int key = y * 10000 + m * 100 + d;
+        for (int h : HOL) if (h == key) return 1;
+        return 0;
+    }
+
+    // ---- 画面の部品 ----
+    void odpt_failed() { odpt_state = 2; dirty_ui = true; }
+    float px(float v) const { return v * (float)ui; }
+    int fpx(float v) const { return std::max(8, (int)std::lround(v * ui)); }
+    bool wide() const { return W / ui >= 700; }   // 凡例を出す広さ（スマホの縦では出さない）
+    static std::string hhmmss(double t) {
+        long long s = (long long)std::floor(t + 9 * 3600) % 86400; if (s < 0) s += 86400;
+        char b[16]; snprintf(b, sizeof b, "%02d:%02d:%02d", (int)(s / 3600), (int)(s / 60 % 60), (int)(s % 60));
+        return b;
+    }
+    void text(Canvas& cv, float x, float y, const std::string& s, float size, Rgb c) { font.draw(cv, x, y, s, fpx(size), c, {0, 0, 0}, 0); }
+    float tw(const std::string& s, float size) { return font.width(s, fpx(size)); }
+    void panel(Canvas& cv, float x0, float y0, float x1, float y1) {
+        round_rect(cv, x0, y0, x1, y1, px(12), {0.07f, 0.09f, 0.14f}, 0.84f);
+        panels.push_back({x0, y0, x1, y1, PANEL});
+    }
+    void button(Canvas& cv, float x, float y, const std::string& s, int id, bool on) {
+        float w = tw(s, 13.5f) + px(22), h = px(30);
+        round_rect(cv, x, y, x + w, y + h, px(8), on ? Rgb{0.35f, 0.69f, 1.0f} : Rgb{0.16f, 0.2f, 0.28f}, 0.95f);
+        text(cv, x + px(11), y + h / 2 + px(13.5f) * 0.36f, s, 13.5f, on ? Rgb{0.02f, 0.07f, 0.12f} : Rgb{0.9f, 0.93f, 0.97f});
+        buttons.push_back({x, y, x + w, y + h, id});
+    }
+    // 路線の丸い印（色の丸に記号の文字）
+    void line_mark(Canvas& cv, float cx, float cy, int l) {
+        const auto& L = net.lines[l];
+        disc(cv, {cx, cy}, px(11), hex(L.color));
+        std::string c(1, L.code);
+        font.draw(cv, cx - tw(c, 11.5f) / 2, cy + px(11.5f) * 0.36f, c, fpx(11.5f), {1, 1, 1}, {0.05f, 0.05f, 0.08f}, 1.2f);
+    }
+    // 文字の並び（色つきの切れ目）を幅 maxw で折り返して書く。y は 1 行目のベースライン。戻り値は使った高さ（cv が null なら測るだけ）
+    struct Run { std::string s; Rgb c; };
+    float wrap(Canvas* cv, float x, float y, float maxw, const std::vector<Run>& runs, float size, float lh) {
+        static const std::string NO_HEAD = "、。，．）」』・／";   // 行の頭に来ないほうがよい文字
+        float pen = 0; int line = 0, sz = fpx(size);
+        for (auto& r : runs)
+            for (size_t i = 0; i < r.s.size();) {
+                size_t j = i; next_cp(r.s, j);
+                auto word = [&](size_t k) { return k < r.s.size() && (std::isalnum((unsigned char)r.s[k]) || r.s[k] == '.' || r.s[k] == '-'); };
+                if (word(i)) while (word(j)) ++j;   // 英数字の単語は途中で折らない
+                std::string ch = r.s.substr(i, j - i); i = j;
+                if (ch == "\n") { pen = 0; ++line; continue; }
+                float w = font.width(ch, sz);
+                if (pen > 0 && pen + w > maxw && NO_HEAD.find(ch) == std::string::npos) { pen = 0; ++line; }
+                if (pen == 0 && ch == " ") continue;
+                if (cv) font.draw(*cv, x + pen, y + line * lh, ch, sz, r.c, {0, 0, 0}, 0);
+                pen += w;
+            }
+        return (line + 1) * lh;
+    }
+
+    void draw_ui(Canvas& cv) {
+        buttons.clear(); panels.clear();
+        if (!font.ok) return;
+        const Rgb fg{0.9f, 0.93f, 0.97f}, muted{0.55f, 0.6f, 0.68f};
+        // 左上：題名・いまの様子・ボタン
+        std::string st = std::to_string(net.lines.size()) + " 路線・" + std::to_string(net.nodes.size()) + " 駅";
+        if (odpt_state == 1) st += " ・ 都営の列車 " + std::to_string(live_count) + " 本（" + hhmmss(odpt_time) + " 更新）";
+        else if (odpt_state == 2) st += " ・ 都営の列車を取れませんでした。30 秒後にもう一度";
+        const std::string title = "東京の地下鉄 列車マップ", b1 = "実際の地図", b2 = "路線図", b3 = "全体を表示";
+        float bw = tw(b1, 13.5f) + tw(b2, 13.5f) + tw(b3, 13.5f) + px(22 * 3 + 6 * 2);
+        float inner = std::max({tw(title, 16), bw, std::min(tw(st, 11.5f), px(420))});
+        inner = std::min(inner, (float)W - px(32 + 28));
+        const float x0 = px(16), y0 = px(16), slh = px(17);
+        float sth = wrap(nullptr, 0, 0, inner, {{st, muted}}, 11.5f, slh);
+        float hpan = px(12) + px(20) + px(4) + sth + px(8) + px(30) + px(14);
+        panel(cv, x0, y0, x0 + inner + px(28), y0 + hpan);
+        float y = y0 + px(12) + px(16);
+        text(cv, x0 + px(14), y, title, 16, fg);
+        y += px(4) + px(16);
+        wrap(&cv, x0 + px(14), y, inner, {{st, muted}}, 11.5f, slh);
+        y += sth - slh + px(12);
+        bool sch = target > 0.5;
+        button(cv, x0 + px(14), y, b1, BTN_GEO, !sch);
+        button(cv, buttons.back().x1 + px(6), y, b2, BTN_SCH, sch);
+        button(cv, buttons.back().x1 + px(6), y, b3, BTN_FIT, false);
+        // 右上：路線の凡例（広い画面だけ）
+        if (wide()) {
+            float nw = 0;
+            for (auto& L : net.lines) nw = std::max(nw, tw(L.name, 12.5f));
+            float rowh = px(26), lx1 = W - px(16), lx0 = lx1 - (nw + px(12 + 22 + 8 + 14)), ly0 = px(16);
+            int rows = std::min((int)net.lines.size(), (int)((H - px(32 + 20)) / rowh));
+            if (rows > 0) {
+                panel(cv, lx0, ly0, lx1, ly0 + px(8) + rows * rowh + px(8));
+                for (int i = 0; i < rows; ++i) {
+                    float cy = ly0 + px(8) + rowh * (i + 0.5f);
+                    line_mark(cv, lx0 + px(12 + 11), cy, i);
+                    text(cv, lx0 + px(12 + 22 + 8), cy + px(12.5f) * 0.36f, net.lines[i].name, 12.5f, fg);
+                }
+            }
+        }
+        // 左下：説明と出典
+        std::vector<Run> note = {
+            {"都営 4 路線", fg}, {"（浅草・三田・新宿・大江戸）の列車は、いま実際に走っている列車の位置（ODPT、約 30 秒ごとに更新）。", muted},
+            {"メトロ 9 路線", fg}, {"は列車位置が公開されていないので、時刻表（ODPT）どおりの位置で走らせています（ダイヤ上の位置。遅延は反映しません）。"
+                                  "いずれも駅と駅のあいだは補間しています。光る頭と尾が列車で、尾の反対側へ進んでいます。"
+                                  "赤く光る玉は現在地（都内にいるときだけ）。ドラッグで移動、ホイール・2 本指で拡大縮小、駅や列車をタップで名前・行き先。\n", muted},
+            {"列車の位置（都営）：公共交通オープンデータセンター（ODPT）を通じて東京都交通局が提供するデータを使用。内容の正確さ・完全さは保証されません／"
+             "線路と駅：「国土数値情報（鉄道データ N02）」、東京都の外周と 23 区の区界：「国土数値情報（行政区域データ N03）」（いずれも国土交通省）を加工して作成（CC BY 4.0）／"
+             "文字：Noto Sans JP（SIL OFL 1.1）", {0.47f, 0.52f, 0.6f}}};
+        float nw = std::min((float)W - px(32 + 24), px(560)), lh = px(16.5f);
+        float nh = wrap(nullptr, 0, 0, nw, note, 11, lh) + px(16);
+        float ny1 = H - px(16), ny0 = ny1 - nh;
+        if (ny0 > y0 + hpan + px(8)) {   // 上のパネルと重なるほど狭い画面では出さない
+            panel(cv, x0, ny0, x0 + nw + px(24), ny1);
+            wrap(&cv, x0 + px(12), ny0 + px(8) + lh * 0.75f, nw, note, 11, lh);
+        }
+    }
+
+    // 吹き出し：列車（路線・行き先・列車番号・遅れ）か駅（名前と路線）
+    void draw_tip(Canvas& cv) {
+        if (hover_x < 0 || !font.ok || hit(hover_x, hover_y)) return;
+        struct Ln { int mark; std::string s; Rgb c; };
+        std::vector<Ln> lines;
+        const Rgb fg{1, 1, 1}, sub{0.75f, 0.8f, 0.88f};
+        int ti = pick_train(hover_x, hover_y, 10 * ui);
+        if (ti >= 0) {
+            const Train& t = trains[ti];
+            bool named = t.live || t.sched;   // 行き先・列車番号を出せる（都営の実列車 or メトロのダイヤ）
+            lines.push_back({t.line, net.lines[t.line].name, fg});
+            if (named) lines.push_back({-1, (t.dest.empty() ? std::string() : t.dest + " 行き・") + t.number, sub});
+            std::string d = t.sched ? "ダイヤ上の位置" : !t.live ? "仮の列車" : t.delay >= 60 ? std::to_string((int)std::lround(t.delay / 60)) + " 分遅れ" : "遅れなし";
+            lines.push_back({-1, d, sub});
+        } else {
+            int n = pick(hover_x, hover_y, 14 * ui);
+            if (n < 0) return;
+            lines.push_back({-1, net.nodes[n].name, fg});
+            for (int l : net.nodes[n].lines) lines.push_back({l, net.lines[l].name, sub});
+        }
+        float w = 0;
+        for (auto& l : lines) w = std::max(w, tw(l.s, 13) + (l.mark >= 0 ? px(30) : 0));
+        w += px(20);
+        float rowh = px(24), h = px(10) + rowh * lines.size();
+        float x = std::min((float)hover_x + px(14), W - w - px(4)), y = std::min((float)hover_y + px(14), H - h - px(4));
+        round_rect(cv, x, y, x + w, y + h, px(10), {0.07f, 0.09f, 0.14f}, 0.94f);
+        for (size_t i = 0; i < lines.size(); ++i) {
+            float cy = y + px(5) + rowh * (i + 0.5f), tx = x + px(10);
+            if (lines[i].mark >= 0) { line_mark(cv, tx + px(11), cy, lines[i].mark); tx += px(30); }
+            text(cv, tx, cy + px(13) * 0.36f, lines[i].s, 13, lines[i].c);
+        }
+    }
+
+    // ---- 操作 ----
+    void hover(double x, double y) { hover_x = x; hover_y = y; }
+    // その点のボタン（id）。パネルの上なら PANEL、どちらでもなければ 0
+    int hit(double x, double y) const {
+        for (auto& b : buttons) if (x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1) return b.id;
+        for (auto& b : panels) if (x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1) return PANEL;
+        return 0;
+    }
+    int click(double x, double y) {
+        int id = hit(x, y);
+        if (id == BTN_GEO) { set_mode(0); dirty_ui = true; }
+        else if (id == BTN_SCH) { set_mode(1); dirty_ui = true; }
+        else if (id == BTN_FIT) fit();
+        return id;
+    }
+
     // ---- 現在地 ----
     // 点 p が多角形の輪たちの内側か（偶奇則）
     static bool inside(const std::vector<std::vector<P2>>& rings, P2 p) {
@@ -638,20 +834,25 @@ struct Map {
         }
         return here + off * (e / wsum);
     }
-    // 現在地の印：白い縁の赤い丸
+    // 現在地の印：列車・バスと同じ光る玉（赤）。ゆっくり息をするように光の大きさが変わる
     void draw_here(Canvas& cv) {
         if (!here_on) return;
         V2 p = to_screen(here_pos());
-        if (p.x < -20 || p.y < -20 || p.x > W + 20 || p.y > H + 20) return;
-        disc(cv, p, 8 * (float)ui, {1, 1, 1}, 1.f);
-        disc(cv, p, 6 * (float)ui, {0.95f, 0.15f, 0.15f}, 1.f);
+        if (p.x < -40 || p.y < -40 || p.x > W + 40 || p.y > H + 40) return;
+        const Rgb red{1.0f, 0.18f, 0.15f};
+        float breathe = 0.5f + 0.5f * (float)std::sin(wall * 2.5);   // 0..1、約 2.5 秒で 1 回
+        glow_dot(cv, p, 26 * (float)ui + 8 * (float)ui * breathe, red, 0.75f + 0.25f * breathe);   // 外の光
+        glow_dot(cv, p, 12 * (float)ui, red, 1.0f);                                    // 内の光
+        disc(cv, p, 8 * (float)ui, {0.08f, 0.01f, 0.01f}, 0.85f);                         // 細い暗い縁（明るい線の上でも見えるように）
+        disc(cv, p, 6.5f * (float)ui, red, 1.f);                                        // 芯（赤のまま）
+        glow_dot(cv, p, 4.5f * (float)ui, {1, 0.85f, 0.8f}, 0.9f);                       // 真ん中の白いきらめき
     }
 
     const uint8_t* render() {
-        if (dirty || mode != last_mode) { draw_base(); dirty = false; last_mode = mode; }
-        frame.px = base.px;
+        if (dirty || mode != last_mode) { draw_base(); dirty = false; last_mode = mode; dirty_ui = true; }
+        if (dirty_ui) { info.px = base.px; draw_ui(info); dirty_ui = false; }
+        frame.px = info.px;
         const float lw = line_width();
-        draw_here(frame);   // 列車より下に（近くの列車が隠れないように）
         for (auto& t : trains) {
             V2 p = train_pos(t);
             if (p.x < -60 || p.y < -60 || p.x > W + 60 || p.y > H + 60) continue;
@@ -670,6 +871,15 @@ struct Map {
             disc(frame, p, lw * 1.35f, mix(c, {1, 1, 1}, 0.75f), 1.f);
             glow_dot(frame, p, lw * 1.6f, {1, 1, 1}, 0.8f);
         }
+        draw_here(frame);   // 列車の上に（光は足し算なので、近くの列車は透けて見える）
+        // パネルは列車より上に：パネルの四角だけ、とっておいた絵（info）に戻す
+        for (auto& b : panels) {
+            int x0 = std::max(0, (int)std::floor(b.x0)), x1 = std::min(W, (int)std::ceil(b.x1));
+            if (x1 <= x0) continue;
+            for (int y = std::max(0, (int)std::floor(b.y0)); y < std::min(H, (int)std::ceil(b.y1)); ++y)
+                std::copy(info.px.begin() + ((size_t)y * W + x0) * 3, info.px.begin() + ((size_t)y * W + x1) * 3, frame.px.begin() + ((size_t)y * W + x0) * 3);
+        }
+        draw_tip(frame);
         frame.to_rgba(rgba.data());
         return rgba.data();
     }

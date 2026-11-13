@@ -166,6 +166,20 @@ inline uint32_t next_cp(const std::string& s, size_t& i) {
     return cp;
 }
 
+// 角を丸めた四角の塗り（パネルの下地）
+inline void round_rect(Canvas& cv, float x0, float y0, float x1, float y1, float r, Rgb color, float alpha = 1.f) {
+    Rgb lc = lin(color);
+    for (int y = std::max(0, (int)std::floor(y0)); y < std::min(cv.h, (int)std::ceil(y1)); ++y)
+        for (int x = std::max(0, (int)std::floor(x0)); x < std::min(cv.w, (int)std::ceil(x1)); ++x) {
+            float px = x + 0.5f, py = y + 0.5f;
+            float qx = std::max({x0 + r - px, px - (x1 - r), 0.f}), qy = std::max({y0 + r - py, py - (y1 - r), 0.f});
+            float d = std::sqrt(qx * qx + qy * qy) - r;   // 外側で正
+            float c = std::clamp(0.5f - d, 0.f, 1.f);
+            c *= std::clamp(std::min({px - x0, x1 - px, py - y0, y1 - py}) + 0.5f, 0.f, 1.f);
+            cv.blend(x, y, lc, c * alpha);
+        }
+}
+
 struct Font {
     std::vector<unsigned char> data;
     stbtt_fontinfo info{};

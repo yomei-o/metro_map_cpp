@@ -69,5 +69,14 @@ int main(int argc, char** argv) {
         printf("%s: full %.0f ms, trains only %.1f ms -> %s\n", s.name, std::chrono::duration<double, std::milli>(b - a).count(),
                std::chrono::duration<double, std::milli>(c - b).count(), f.c_str());
     }
+    // 吹き出し（大手町駅）と、スマホの縦長の画面（凡例は出さない）→ <out>_tip.png, <out>_phone.png
+    auto save = [&](const char* name) { std::string f = out + "_" + name + ".png"; stbi_write_png(f.c_str(), m.W, m.H, 4, m.render(), m.W * 4); printf("-> %s\n", f.c_str()); };
+    m.mode = m.target = 0; m.dirty = true;
+    for (size_t n = 0; n < m.net.nodes.size(); ++n)
+        if (m.net.nodes[n].name == "大手町") { mm::V2 p = m.to_screen(m.node_pos((int)n)); m.hover(p.x, p.y); }
+    save("tip");
+    m.hover(-1, -1);
+    m.ui = 1.5; m.resize(585, 1200); m.fit();
+    save("phone");
     return 0;
 }
