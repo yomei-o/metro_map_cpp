@@ -51,6 +51,9 @@ int main(int argc, char** argv) {
             for (int k = 0; k < (a + 1 < argc ? 60 : 30); ++k) { m.wall += 0.5; m.tick(0.5); }
         }
     }
+    // 現在地：都の外（横浜駅）なら出さない。都内（東京駅）なら赤い丸（3 枚の絵すべてに出る）
+    printf("here: yokohama -> %d (0 = outside)\n", m.set_here(35.4658, 139.6223));
+    printf("here: tokyo st -> %d (1 = inside)\n", m.set_here(35.6812, 139.7671));
     struct Shot { const char* name; double mode; };
     for (Shot s : {Shot{"geo", 0.0}, Shot{"mid", 0.5}, Shot{"sch", 1.0}}) {
         m.mode = m.target = s.mode;

@@ -223,6 +223,11 @@ function isHoliday(d) {
   statusEl.textContent = baseStatus;
   size(); M._mm_fit();
   requestAnimationFrame(frame);
+  // 現在地：ブラウザから緯度・経度をもらって渡すだけ。都内かどうかの判定と赤い丸は C++ が
+  if (navigator.geolocation) navigator.geolocation.watchPosition(
+    pos => M._mm_here(pos.coords.latitude, pos.coords.longitude),
+    () => M._mm_here_off(),
+    { enableHighAccuracy: true, maximumAge: 10000 });
   // 都営の列車：ODPT の公開用 API（キー無し）から 30 秒ごとに取る。タブが見えていないあいだは止める
   const table = await fetch('odpt_toei.txt').then(r => r.text());
   const tn = M.lengthBytesUTF8(table) + 1, tt = M._malloc(tn); M.stringToUTF8(table, tt, tn);

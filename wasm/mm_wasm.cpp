@@ -32,6 +32,9 @@ EMSCRIPTEN_KEEPALIVE void mm_calendar(int cal) { g.metro_cal = cal ? 1 : 0; g.la
 // ODPT: odpt:Train の JSON を反映する。戻り値は地図に載った列車の数
 EMSCRIPTEN_KEEPALIVE int mm_odpt(const char* json, double wall) { g.wall = wall; return g.apply_odpt(json); }
 EMSCRIPTEN_KEEPALIVE const uint8_t* mm_render() { return g.render(); }
+// 現在地（緯度・経度）。東京都（本土）の中なら赤い丸を出して 1、外なら出さずに 0。mm_here_off で消す
+EMSCRIPTEN_KEEPALIVE int mm_here(double lat, double lon) { return g.set_here(lat, lon); }
+EMSCRIPTEN_KEEPALIVE void mm_here_off() { g.clear_here(); }
 // 路線の一覧（凡例用）: [{"code":"G","name":"銀座線","color":"FF9500"},...]
 EMSCRIPTEN_KEEPALIVE const char* mm_lines() {
     g_json = "[";

@@ -6,6 +6,7 @@
 //   m.set_mode(1);            // 0 = 実際の地図風、1 = 路線図風（なめらかに変形する）
 //   m.tick(dt_seconds);       // 変形と列車を進める
 //   const uint8_t* rgba = m.render();
+//   m.set_here(lat, lon);     // 現在地（スマホの GPS など）。東京都（本土）の中のときだけ赤い丸で出す
 //
 // 地図（線・駅・駅名・光）は表示が変わったときだけ描き直してとっておき、毎フレームは列車だけを重ねる。
 #pragma once
@@ -78,6 +79,9 @@ struct Map {
     int metro_cal = 0;                // 0=平日 1=土休（ページが渡す）
     int metro_count = 0;
     double last_metro = -1;
+    // 現在地（ページが navigator.geolocation から受け取って渡す）。都内（本土）のときだけ赤い丸で出す
+    bool here_on = false;
+    P2 here;                          // km（mercator）
 
     bool load(const std::string& text, const unsigned char* font_bytes, size_t font_n) {
         if (!parse_network(text, net)) return false;
@@ -598,10 +602,56 @@ struct Map {
         return out;
     }
 
+    // ---- 現在地 ----
+    // 点 p が多角形の輪たちの内側か（偶奇則）
+    static bool inside(const std::vector<std::vector<P2>>& rings, P2 p) {
+        bool in = false;
+        for (auto& r : rings)
+            for (size_t i = 0, j = r.size() - 1; i < r.size(); j = i++)
+                if ((r[i].y > p.y) != (r[j].y > p.y) && p.x < (r[j].x - r[i].x) * (p.y - r[i].y) / (r[j].y - r[i].y) + r[i].x) in = !in;
+        return in;
+    }
+    // 東京都（本土）の中か。外周がまだ読めていなければ、おおまかな矩形で
+    bool in_tokyo(double lat, double lon) const {
+        if (!admin_pref.empty()) return inside(admin_pref, mercator(lon, lat));
+        return lon > 138.94 && lon < 139.93 && lat > 35.50 && lat < 35.90;
+    }
+    // 戻り値は 1 = 都内（赤い丸を出す）、0 = 都の外（出さない）
+    int set_here(double lat, double lon) {
+        here_on = in_tokyo(lat, lon);
+        here = mercator(lon, lat);
+        return here_on;
+    }
+    void clear_here() { here_on = false; }
+    // 画面に出す位置。路線図風へ変形するときは、近くの駅（4 つ、近いほど重く）がずれたぶんだけ一緒にずらす
+    P2 here_pos() const {
+        double e = ease();
+        if (e <= 0 || net.nodes.empty()) return here;
+        std::vector<std::pair<double, int>> d;
+        for (size_t n = 0; n < net.nodes.size(); ++n) { P2 v = net.nodes[n].geo - here; d.push_back({dot(v, v), (int)n}); }
+        size_t k = std::min<size_t>(4, d.size());
+        std::partial_sort(d.begin(), d.begin() + k, d.end());
+        P2 off{0, 0}; double wsum = 0;
+        for (size_t i = 0; i < k; ++i) {
+            double w = 1.0 / (d[i].first + 0.01);   // 0.1 km ほどより近ければ、ほぼその駅と同じだけ
+            off = off + (sch_km[d[i].second] - net.nodes[d[i].second].geo) * w; wsum += w;
+        }
+        return here + off * (e / wsum);
+    }
+    // 現在地の印：白い縁の赤い丸
+    void draw_here(Canvas& cv) {
+        if (!here_on) return;
+        V2 p = to_screen(here_pos());
+        if (p.x < -20 || p.y < -20 || p.x > W + 20 || p.y > H + 20) return;
+        disc(cv, p, 8 * (float)ui, {1, 1, 1}, 1.f);
+        disc(cv, p, 6 * (float)ui, {0.95f, 0.15f, 0.15f}, 1.f);
+    }
+
     const uint8_t* render() {
         if (dirty || mode != last_mode) { draw_base(); dirty = false; last_mode = mode; }
         frame.px = base.px;
         const float lw = line_width();
+        draw_here(frame);   // 列車より下に（近くの列車が隠れないように）
         for (auto& t : trains) {
             V2 p = train_pos(t);
             if (p.x < -60 || p.y < -60 || p.x > W + 60 || p.y > H + 60) continue;
